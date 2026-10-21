@@ -8,11 +8,16 @@ import { formatTime } from '../utils/formatters.ts';
 interface SearchViewProps {
   initialQuery?: string;
   onNavigate: (view: ViewType, payload?: any) => void;
+  onOpenAddToPlaylist?: (track: Track) => void;
 }
 
 type FilterChip = 'All' | 'Songs' | 'Artists' | 'Albums' | 'Playlists' | 'Videos';
 
-export const SearchView: React.FC<SearchViewProps> = ({ initialQuery = '', onNavigate }) => {
+export const SearchView: React.FC<SearchViewProps> = ({ 
+  initialQuery = '', 
+  onNavigate,
+  onOpenAddToPlaylist 
+}) => {
   const { playTrack, currentTrack, isPlaying, togglePlay, toggleLike, isLiked, addToQueue } = usePlayer();
 
   const [query, setQuery] = useState(initialQuery);
@@ -231,6 +236,15 @@ export const SearchView: React.FC<SearchViewProps> = ({ initialQuery = '', onNav
                               className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:text-white hover:bg-zinc-800"
                             >
                               Add to queue
+                            </button>
+                            <button
+                              onClick={() => {
+                                onOpenAddToPlaylist?.(track);
+                                setActiveMenuId(null);
+                              }}
+                              className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:text-white hover:bg-zinc-800"
+                            >
+                              Add to playlist
                             </button>
                             <button
                               onClick={() => {

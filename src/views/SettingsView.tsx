@@ -106,8 +106,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onNavigate }) => {
               </div>
             </div>
             {user ? (
-              <span className="text-xs text-emerald-400 font-semibold uppercase px-2.5 py-0.5 rounded bg-emerald-500/10">
-                {userProfile?.plan || 'Premium'}
+              <span className="text-xs text-zinc-400 font-medium px-2.5 py-0.5 rounded bg-zinc-800">
+                Active
               </span>
             ) : (
               <button

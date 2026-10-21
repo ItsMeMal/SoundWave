@@ -14,7 +14,8 @@ import {
   FileText, 
   Trash2,
   ListMusic,
-  Check
+  Check,
+  Plus
 } from 'lucide-react';
 import { usePlayer } from '../../context/PlayerContext.tsx';
 import { formatTime } from '../../utils/formatters.ts';
@@ -22,10 +23,15 @@ import { ViewType, Track } from '../../types/music.ts';
 
 interface RightPlayerPanelProps {
   onNavigate: (view: ViewType, payload?: any) => void;
+  onOpenAddToPlaylist?: (track: Track) => void;
   className?: string;
 }
 
-export const RightPlayerPanel: React.FC<RightPlayerPanelProps> = ({ onNavigate, className = '' }) => {
+export const RightPlayerPanel: React.FC<RightPlayerPanelProps> = ({ 
+  onNavigate, 
+  onOpenAddToPlaylist, 
+  className = '' 
+}) => {
   const {
     currentTrack,
     isPlaying,
@@ -124,6 +130,18 @@ export const RightPlayerPanel: React.FC<RightPlayerPanelProps> = ({ onNavigate, 
               >
                 <FileText className="w-4 h-4 text-emerald-400" />
                 <span>View Lyrics</span>
+              </button>
+              <button
+                onClick={() => {
+                  setShowOptions(false);
+                  if (displayTrack && onOpenAddToPlaylist) {
+                    onOpenAddToPlaylist(displayTrack);
+                  }
+                }}
+                className="w-full px-4 py-2 text-left text-xs text-zinc-300 hover:text-white hover:bg-zinc-800 flex items-center gap-2.5"
+              >
+                <Plus className="w-4 h-4 text-emerald-400" />
+                <span>Add to Playlist</span>
               </button>
               <button
                 onClick={() => {

@@ -14,6 +14,8 @@ import { BottomPlayerBar } from './components/layout/BottomPlayerBar.tsx';
 import { MobileNav } from './components/layout/MobileNav.tsx';
 import { AuthModal } from './components/modals/AuthModal.tsx';
 import { CreatePlaylistModal } from './components/modals/CreatePlaylistModal.tsx';
+import { AddToPlaylistModal } from './components/modals/AddToPlaylistModal.tsx';
+import { Track } from './types/music.ts';
 import { HomeView } from './views/HomeView.tsx';
 import { SearchView } from './views/SearchView.tsx';
 import { LibraryView } from './views/LibraryView.tsx';
@@ -22,7 +24,7 @@ import { SettingsView } from './views/SettingsView.tsx';
 import { LyricsView } from './views/LyricsView.tsx';
 import { ArtistView } from './views/ArtistView.tsx';
 import { PlaylistView } from './views/PlaylistView.tsx';
-import { getUserPlaylists, testFirestoreConnection } from './services/firebase.ts';
+import { getUserPlaylists } from './services/firebase.ts';
 
 function SoundWaveMain() {
   const { user } = useAuth();
@@ -31,6 +33,7 @@ function SoundWaveMain() {
   const [searchQuery, setSearchQuery] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [createPlaylistOpen, setCreatePlaylistOpen] = useState(false);
+  const [addToPlaylistTrack, setAddToPlaylistTrack] = useState<Track | null>(null);
   const [userPlaylists, setUserPlaylists] = useState<Playlist[]>([]);
 
   // Fetch user playlists from Firestore
@@ -119,6 +122,7 @@ function SoundWaveMain() {
             <SearchView 
               initialQuery={viewPayload?.query || searchQuery}
               onNavigate={handleNavigate}
+              onOpenAddToPlaylist={(track) => setAddToPlaylistTrack(track)}
             />
           )}
 
@@ -183,6 +187,7 @@ function SoundWaveMain() {
       {/* Desktop Right Player Panel (Matches Reference UI) */}
       <RightPlayerPanel 
         onNavigate={handleNavigate}
+        onOpenAddToPlaylist={(track) => setAddToPlaylistTrack(track)}
         className="hidden xl:flex"
       />
 
@@ -195,6 +200,17 @@ function SoundWaveMain() {
           setUserPlaylists(prev => [newPl, ...prev]);
           handleNavigate('playlist', { id: newPl.id, playlist: newPl, name: newPl.name });
         }}
+      />
+      <AddToPlaylistModal
+        isOpen={!!addToPlaylistTrack}
+        track={addToPlaylistTrack}
+        userPlaylists={userPlaylists}
+        onClose={() => setAddToPlaylistTrack(null)}
+        onOpenCreatePlaylist={() => {
+          setAddToPlaylistTrack(null);
+          setCreatePlaylistOpen(true);
+        }}
+        onRefreshPlaylists={fetchPlaylists}
       />
     </div>
   );

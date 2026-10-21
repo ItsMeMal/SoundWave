@@ -187,9 +187,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <p className="text-sm font-semibold text-white truncate leading-snug">
                     {user.displayName || user.email?.split('@')[0] || 'Mallss'}
                   </p>
-                  <span className="text-[11px] font-medium text-emerald-400 tracking-wide uppercase">
-                    {userProfile?.plan || 'Premium'}
-                  </span>
+                  <p className="text-[11px] text-zinc-400 truncate">
+                    {user.email || 'SoundWave Member'}
+                  </p>
                 </div>
               </div>
               <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${profileMenuOpen ? 'rotate-180' : ''}`} />
