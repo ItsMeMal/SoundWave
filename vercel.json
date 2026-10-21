@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/music/api/:path*",
+      "destination": "https://music-api.amanenime.my.id/api/:path*"
+    },
+    {
+      "source": "/api/music/:path*",
+      "destination": "https://music-api.amanenime.my.id/api/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

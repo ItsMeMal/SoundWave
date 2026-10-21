@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile information and general metadata",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "displayName": { "type": "string", "maxLength": 128 },
+        "photoURL": { "type": "string", "maxLength": 1024 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Playlist": {
+      "title": "Playlist",
+      "description": "User created music playlist",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 500 },
+        "coverUrl": { "type": "string", "maxLength": 1024 },
+        "trackCount": { "type": "number" },
+        "tracks": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "name"]
+    },
+    "LikedTrack": {
+      "title": "LikedTrack",
+      "description": "Favorite or liked track metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "videoId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 256 },
+        "artist": { "type": "string", "maxLength": 256 },
+        "album": { "type": "string", "maxLength": 256 },
+        "thumbnailUrl": { "type": "string", "maxLength": 1024 },
+        "duration": { "type": "number" },
+        "likedAt": { "type": "string" }
+      },
+      "required": ["id", "videoId", "userId", "title", "artist"]
+    },
+    "PlaybackHistory": {
+      "title": "PlaybackHistory",
+      "description": "User playback history entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "videoId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 256 },
+        "artist": { "type": "string", "maxLength": 256 },
+        "thumbnailUrl": { "type": "string", "maxLength": 1024 },
+        "playedAt": { "type": "string" }
+      },
+      "required": ["id", "videoId", "userId", "title"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "User application preferences and settings",
+      "type": "object",
+      "properties": {
+        "playbackQuality": { "type": "string", "enum": ["Low", "Normal", "High", "Lossless"] },
+        "downloadQuality": { "type": "string", "enum": ["Low", "Normal", "High"] },
+        "autoplay": { "type": "boolean" },
+        "theme": { "type": "string", "enum": ["dark", "light", "system"] },
+        "language": { "type": "string", "maxLength": 10 },
+        "updatedAt": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile document"
+    },
+    "/users/{userId}/playlists/{playlistId}": {
+      "schema": "Playlist",
+      "description": "User music playlists"
+    },
+    "/users/{userId}/likedTracks/{trackId}": {
+      "schema": "LikedTrack",
+      "description": "User favorite tracks"
+    },
+    "/users/{userId}/history/{historyId}": {
+      "schema": "PlaybackHistory",
+      "description": "User playback history"
+    },
+    "/users/{userId}/settings/{settingId}": {
+      "schema": "UserSettings",
+      "description": "User preferences and config"
+    }
+  }
+}

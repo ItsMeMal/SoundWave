@@ -1,0 +1,7 @@
+{
+  "name": "SoundWave",
+  "description": "Platform streaming musik modern yang memadukan keunggulan Spotify dan YouTube Music dengan desain dark premium yang elegan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
