@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Plus, Check, Music2, Loader2 } from 'lucide-react';
 import { Track, Playlist } from '../../types/music.ts';
 import { useAuth } from '../../context/AuthContext.tsx';
@@ -26,6 +26,14 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
   const { notify } = useToast();
   const [savingId, setSavingId] = useState<string | null>(null);
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
+
+  // Optimistic "Added" state belongs only to the current track/modal session.
+  // Without this reset, adding one track disables that playlist for every later track
+  // until the whole page is refreshed.
+  useEffect(() => {
+    setAddedIds(new Set());
+    setSavingId(null);
+  }, [track?.id, isOpen]);
 
   if (!isOpen || !track) return null;
 
