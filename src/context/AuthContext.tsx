@@ -44,7 +44,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const profile = await syncUserProfile(currentUser);
           setUserProfile(profile);
         } catch (e) {
-          console.error('Failed to sync profile', e);
+          console.warn('Profile sync notice:', e);
         }
       } else {
         setUserProfile(null);

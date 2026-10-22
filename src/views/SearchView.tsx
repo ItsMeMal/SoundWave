@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Search as SearchIcon, Play, Pause, Heart, MoreHorizontal, Loader2, Music, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Search as SearchIcon, Play, Pause, Heart, MoreHorizontal, Loader2, Music, AlertCircle, RotateCcw } from 'lucide-react';
 import { ViewType, Track } from '../types/music.ts';
 import { searchMusic } from '../services/musicApi.ts';
 import { usePlayer } from '../context/PlayerContext.tsx';
 import { formatTime } from '../utils/formatters.ts';
+import { CoverImage } from '../components/common/CoverImage.tsx';
 
 interface SearchViewProps {
   initialQuery?: string;
@@ -27,25 +28,41 @@ export const SearchView: React.FC<SearchViewProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
+  const activeRequestRef = useRef<number>(0);
+
   const filterChips: FilterChip[] = ['All', 'Songs', 'Artists', 'Albums', 'Playlists', 'Videos'];
 
-  // Trigger search
   const performSearch = async (searchTerm: string) => {
     if (!searchTerm.trim()) {
       setResults([]);
+      setLoading(false);
       return;
     }
 
+    const requestId = ++activeRequestRef.current;
     setLoading(true);
     setError(null);
+
     try {
-      const res = await searchMusic(searchTerm.trim(), 20);
-      setResults(res.tracks);
+      // Append filter keyword if specific chip selected
+      const queryWithFilter = activeChip !== 'All' && activeChip !== 'Songs'
+        ? `${searchTerm.trim()} ${activeChip.toLowerCase()}`
+        : searchTerm.trim();
+
+      const res = await searchMusic(queryWithFilter, 20);
+
+      // Ignore stale responses
+      if (requestId === activeRequestRef.current) {
+        setResults(res.tracks);
+      }
     } catch (err: any) {
-      console.error('Search error:', err);
-      setError('Unable to load search results. Please check your network and retry.');
+      if (requestId === activeRequestRef.current) {
+        setError('Unable to load search results. Please check your connection and retry.');
+      }
     } finally {
-      setLoading(false);
+      if (requestId === activeRequestRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -53,44 +70,21 @@ export const SearchView: React.FC<SearchViewProps> = ({
     if (initialQuery) {
       setQuery(initialQuery);
       performSearch(initialQuery);
-    } else {
-      // Default initial query matching reference screenshot
-      performSearch('dreams');
-      setQuery('dreams');
     }
   }, [initialQuery]);
+
+  useEffect(() => {
+    if (query.trim()) {
+      performSearch(query);
+    }
+  }, [activeChip]);
 
   const topResult = results.length > 0 ? results[0] : null;
   const songResults = results.slice(1);
 
   return (
     <div className="p-6 md:p-8 space-y-6 max-w-6xl mx-auto select-none">
-      {/* Search Input Bar (Visible especially on mobile or dedicated search page) */}
-      <div className="relative">
-        <div className="flex items-center bg-[#151922] border border-[#232936] rounded-xl px-4 py-3 focus-within:border-emerald-500/60 focus-within:ring-1 focus-within:ring-emerald-500/30 transition-all">
-          <SearchIcon className="w-5 h-5 text-zinc-400 mr-3 shrink-0" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && performSearch(query)}
-            placeholder="Search songs, artists, albums, playlists..."
-            className="w-full bg-transparent text-sm text-white placeholder-zinc-500 focus:outline-none"
-          />
-          {loading ? (
-            <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
-          ) : (
-            <button
-              onClick={() => performSearch(query)}
-              className="text-xs px-3 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-md font-medium transition-colors"
-            >
-              Search
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Filter Chips (Exact reference match) */}
+      {/* Filter Category Chips */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1 custom-scrollbar">
         {filterChips.map((chip) => (
           <button
@@ -116,28 +110,41 @@ export const SearchView: React.FC<SearchViewProps> = ({
           </div>
           <button
             onClick={() => performSearch(query)}
-            className="px-3 py-1 bg-rose-500/20 hover:bg-rose-500/30 rounded-lg text-white font-medium"
+            className="px-3.5 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 rounded-lg text-white font-medium flex items-center gap-1.5"
           >
-            Retry
+            <RotateCcw className="w-3.5 h-3.5" /> Retry
           </button>
         </div>
       )}
 
-      {/* Top Result Card & Songs Section (Exact layout from reference UI) */}
-      {topResult && (
+      {/* Loading Skeleton */}
+      {loading && (
+        <div className="space-y-4 animate-pulse">
+          <div className="h-28 bg-[#12161f] rounded-2xl w-full" />
+          <div className="space-y-2">
+            {[1, 2, 3, 4, 5].map(i => (
+              <div key={i} className="h-14 bg-[#12161f] rounded-xl w-full" />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Real API Search Results */}
+      {!loading && topResult && (
         <div className="space-y-6">
           {/* Top Result Card */}
           <section>
             <h2 className="text-base font-bold text-white mb-3">Top result</h2>
-            <div className="bg-[#12161f] border border-[#1e2330] p-5 rounded-2xl flex items-center justify-between group hover:bg-[#151a25] transition-all">
+            <div className="bg-[#12161f] border border-[#1e2330] p-5 rounded-2xl flex items-center justify-between group hover:bg-[#151a25] transition-all overflow-hidden">
               <div 
                 onClick={() => playTrack(topResult, results)}
-                className="flex items-center gap-4 min-w-0 flex-1 cursor-pointer"
+                className="flex items-center gap-4 min-w-0 pr-4 flex-1 cursor-pointer"
               >
-                <img
+                <CoverImage
                   src={topResult.thumbnailUrl}
-                  alt={topResult.title}
-                  className="w-20 h-20 rounded-xl object-cover bg-zinc-800 shadow-md shrink-0"
+                  videoId={topResult.id}
+                  className="w-20 h-20 rounded-xl shadow-md"
+                  iconSize="w-8 h-8"
                 />
                 <div className="min-w-0">
                   <h3 className="text-lg font-bold text-white group-hover:text-emerald-400 transition-colors truncate">
@@ -149,10 +156,10 @@ export const SearchView: React.FC<SearchViewProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 shrink-0 ml-4">
+              <div className="flex items-center gap-3 shrink-0 pr-1">
                 <button
                   onClick={() => playTrack(topResult, results)}
-                  className="w-12 h-12 rounded-full bg-emerald-400 hover:bg-emerald-300 text-black flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-all"
+                  className="w-12 h-12 rounded-full bg-emerald-400 hover:bg-emerald-300 text-black flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-all shrink-0"
                   aria-label="Play Top Result"
                 >
                   {currentTrack?.id === topResult.id && isPlaying ? (
@@ -163,7 +170,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
                 </button>
                 <button
                   onClick={() => toggleLike(topResult)}
-                  className="p-2 text-zinc-400 hover:text-white"
+                  className="p-2 text-zinc-400 hover:text-white shrink-0"
                   aria-label="Like"
                 >
                   <Heart className={`w-5 h-5 ${isLiked(topResult.id) ? 'text-emerald-400 fill-emerald-400' : ''}`} />
@@ -176,7 +183,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
           <section>
             <h2 className="text-base font-bold text-white mb-3">Songs</h2>
             <div className="space-y-1">
-              {(songResults.length > 0 ? songResults : [topResult]).map((track, idx) => {
+              {songResults.map((track, idx) => {
                 const isCurrent = currentTrack?.id === track.id;
                 const liked = isLiked(track.id);
                 return (
@@ -190,10 +197,11 @@ export const SearchView: React.FC<SearchViewProps> = ({
                       onClick={() => playTrack(track, results)}
                       className="flex items-center gap-3.5 min-w-0 flex-1 cursor-pointer"
                     >
-                      <img
+                      <CoverImage
                         src={track.thumbnailUrl}
-                        alt={track.title}
-                        className="w-11 h-11 rounded-lg object-cover bg-zinc-800 shrink-0 shadow-sm"
+                        videoId={track.id}
+                        className="w-11 h-11 rounded-lg shadow-sm"
+                        iconSize="w-5 h-5"
                       />
                       <div className="min-w-0 pr-3">
                         <p className={`text-sm font-semibold truncate ${isCurrent ? 'text-emerald-400' : 'text-white'}`}>
@@ -237,15 +245,17 @@ export const SearchView: React.FC<SearchViewProps> = ({
                             >
                               Add to queue
                             </button>
-                            <button
-                              onClick={() => {
-                                onOpenAddToPlaylist?.(track);
-                                setActiveMenuId(null);
-                              }}
-                              className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:text-white hover:bg-zinc-800"
-                            >
-                              Add to playlist
-                            </button>
+                            {onOpenAddToPlaylist && (
+                              <button
+                                onClick={() => {
+                                  onOpenAddToPlaylist(track);
+                                  setActiveMenuId(null);
+                                }}
+                                className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:text-white hover:bg-zinc-800"
+                              >
+                                Add to playlist
+                              </button>
+                            )}
                             <button
                               onClick={() => {
                                 onNavigate('artist', { name: track.artist });
@@ -268,11 +278,20 @@ export const SearchView: React.FC<SearchViewProps> = ({
       )}
 
       {/* Empty State */}
-      {!loading && results.length === 0 && !error && (
-        <div className="py-16 text-center text-zinc-500 space-y-2">
+      {!loading && query.trim() && results.length === 0 && !error && (
+        <div className="py-20 text-center text-zinc-500 space-y-2">
           <Music className="w-12 h-12 mx-auto text-zinc-600" />
-          <p className="text-sm font-medium">No results found for "{query}".</p>
-          <p className="text-xs text-zinc-500">Try searching for song titles, artist names, or albums.</p>
+          <p className="text-sm font-medium text-white">No results found for "{query}"</p>
+          <p className="text-xs text-zinc-400">Try searching with a different artist, song title, or album.</p>
+        </div>
+      )}
+
+      {/* Initial Query Prompt */}
+      {!loading && !query.trim() && (
+        <div className="py-20 text-center text-zinc-500 space-y-2">
+          <SearchIcon className="w-12 h-12 mx-auto text-zinc-600" />
+          <p className="text-sm font-medium text-white">Search SoundWave</p>
+          <p className="text-xs text-zinc-400">Find your favorite tracks, artists, albums, and playlists.</p>
         </div>
       )}
     </div>

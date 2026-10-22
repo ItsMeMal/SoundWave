@@ -12,12 +12,11 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const MUSIC_API_BASE = 'https://music-api.amanenime.my.id';
 
-// In-memory cache for API responses (5 minute TTL)
 const cache = new Map<string, { data: any; contentType: string; expires: number }>();
 
 app.use(express.json());
 
-// Enable CORS for all clients
+// Enable CORS
 app.use((_req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -30,14 +29,14 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
-// Music API Proxy route with caching and generous timeout
+// Music API Proxy route with caching and 25s timeout
 app.all('/api/music/*', async (req, res) => {
   try {
     const rawPath = req.originalUrl.replace(/^\/api\/music/, '');
     const targetPath = rawPath.startsWith('/api') ? rawPath : `/api${rawPath}`;
     const targetUrl = `${MUSIC_API_BASE}${targetPath}`;
 
-    // Cache hit check for GET requests
+    // Cache hit check for GET
     if (req.method === 'GET') {
       const cached = cache.get(targetUrl);
       if (cached && cached.expires > Date.now()) {
@@ -51,7 +50,6 @@ app.all('/api/music/*', async (req, res) => {
     };
     if (req.headers['accept']) headers['Accept'] = req.headers['accept'] as string;
 
-    // Up to 25s timeout to accommodate external music-api processing latency
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 25000);
 
@@ -67,12 +65,11 @@ app.all('/api/music/*', async (req, res) => {
 
     if (contentType.includes('application/json')) {
       const data = await response.json();
-      // Cache successful GET responses for 10 minutes
       if (response.ok && req.method === 'GET') {
         cache.set(targetUrl, {
           data,
           contentType,
-          expires: Date.now() + 10 * 60 * 1000
+          expires: Date.now() + 10 * 60 * 1000,
         });
       }
       return res.json(data);
@@ -86,7 +83,6 @@ app.all('/api/music/*', async (req, res) => {
   }
 });
 
-// Mount Vite middleware in dev or static files in production
 const isProd = process.env.NODE_ENV === 'production';
 
 if (!isProd) {

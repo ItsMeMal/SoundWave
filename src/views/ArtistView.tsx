@@ -1,39 +1,61 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Play, Pause, Heart, CheckCircle2, Music, Loader2 } from 'lucide-react';
-import { ViewType, Track } from '../types/music.ts';
-import { searchMusic } from '../services/musicApi.ts';
+import { ArrowLeft, Play, Pause, Heart, CheckCircle2, Music, Loader2, AlertCircle, RotateCcw } from 'lucide-react';
+import { ViewType, Track, ArtistDetail } from '../types/music.ts';
+import { getArtistDetail, searchMusic } from '../services/musicApi.ts';
 import { usePlayer } from '../context/PlayerContext.tsx';
 import { formatTime } from '../utils/formatters.ts';
 
 interface ArtistViewProps {
   artistName: string;
+  artistId?: string;
   onNavigate: (view: ViewType, payload?: any) => void;
 }
 
-export const ArtistView: React.FC<ArtistViewProps> = ({ artistName, onNavigate }) => {
+export const ArtistView: React.FC<ArtistViewProps> = ({ artistName, artistId, onNavigate }) => {
   const { playTrack, currentTrack, isPlaying, togglePlay, toggleLike, isLiked } = usePlayer();
+  const [artistData, setArtistData] = useState<ArtistDetail | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isFollowing, setIsFollowing] = useState(false);
 
-  useEffect(() => {
-    let isMounted = true;
-    async function loadArtistTracks() {
-      setLoading(true);
-      try {
-        const res = await searchMusic(artistName, 15);
-        if (isMounted) {
-          setTracks(res.tracks);
+  const loadArtist = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // 1. Try artist endpoint if artistId provided
+      if (artistId) {
+        const detail = await getArtistDetail(artistId);
+        if (detail && detail.topTracks.length > 0) {
+          setArtistData(detail);
+          setTracks(detail.topTracks);
+          setLoading(false);
+          return;
         }
-      } catch (e) {
-        console.warn('Artist tracks load notice:', e);
-      } finally {
-        if (isMounted) setLoading(false);
       }
+
+      // 2. Fetch real tracks by artist name from API search
+      const res = await searchMusic(artistName, 15);
+      if (res.tracks.length > 0) {
+        setTracks(res.tracks);
+        setArtistData({
+          id: artistId || artistName,
+          name: artistName,
+          topTracks: res.tracks,
+        });
+      } else {
+        setTracks([]);
+      }
+    } catch (err: any) {
+      setError('Unable to load artist information.');
+    } finally {
+      setLoading(false);
     }
-    loadArtistTracks();
-    return () => { isMounted = false; };
-  }, [artistName]);
+  };
+
+  useEffect(() => {
+    loadArtist();
+  }, [artistName, artistId]);
 
   const topTrack = tracks[0];
 
@@ -53,20 +75,22 @@ export const ArtistView: React.FC<ArtistViewProps> = ({ artistName, onNavigate }
           <img
             src={topTrack?.thumbnailUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80'}
             alt={artistName}
-            className="w-40 h-40 rounded-full object-cover shadow-2xl border-2 border-emerald-500/30"
+            className="w-40 h-40 rounded-full object-cover shadow-2xl border-2 border-emerald-500/30 bg-zinc-800"
           />
 
           <div className="flex-1 text-center md:text-left min-w-0">
             <div className="flex items-center justify-center md:justify-start gap-1.5 text-emerald-400 text-xs font-bold uppercase tracking-wider mb-1">
               <CheckCircle2 className="w-4 h-4 fill-emerald-400 text-black" />
-              <span>Verified Artist</span>
+              <span>Artist</span>
             </div>
             <h1 className="text-3xl md:text-5xl font-black text-white tracking-tight font-['Plus_Jakarta_Sans']">
               {artistName}
             </h1>
-            <p className="text-xs text-zinc-400 mt-2">
-              Monthly Listeners: 72,490,120 • SoundWave Top Ranked
-            </p>
+            {artistData?.subscribers && (
+              <p className="text-xs text-zinc-400 mt-2">
+                {artistData.subscribers}
+              </p>
+            )}
 
             <div className="mt-5 flex items-center justify-center md:justify-start gap-3">
               {tracks.length > 0 && (
@@ -95,7 +119,22 @@ export const ArtistView: React.FC<ArtistViewProps> = ({ artistName, onNavigate }
 
       {/* Top Tracks List */}
       <div className="p-6 md:p-10 max-w-6xl mx-auto">
-        <h2 className="text-lg font-bold text-white mb-4">Popular tracks</h2>
+        {error && (
+          <div className="mb-4 p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center justify-between text-xs text-rose-300">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-400" />
+              <span>{error}</span>
+            </div>
+            <button
+              onClick={loadArtist}
+              className="px-3.5 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 rounded-lg text-white font-medium flex items-center gap-1.5"
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Retry
+            </button>
+          </div>
+        )}
+
+        <h2 className="text-lg font-bold text-white mb-4">Top tracks</h2>
         {loading ? (
           <div className="py-12 flex justify-center">
             <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
@@ -151,7 +190,10 @@ export const ArtistView: React.FC<ArtistViewProps> = ({ artistName, onNavigate }
             })}
           </div>
         ) : (
-          <p className="text-xs text-zinc-500">No tracks found for this artist.</p>
+          <div className="py-12 text-center text-zinc-500">
+            <Music className="w-10 h-10 mx-auto mb-2 text-zinc-600" />
+            <p className="text-xs">No tracks found for this artist.</p>
+          </div>
         )}
       </div>
     </div>

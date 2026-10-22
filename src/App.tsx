@@ -1,226 +1,257 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React, { useState, useEffect } from 'react';
-import { ViewType, Playlist } from './types/music.ts';
 import { AuthProvider, useAuth } from './context/AuthContext.tsx';
-import { PlayerProvider, usePlayer } from './context/PlayerContext.tsx';
+import { PlayerProvider } from './context/PlayerContext.tsx';
+import { ViewType, Playlist, Track } from './types/music.ts';
+import { subscribeUserPlaylists } from './services/firebase.ts';
+
+// Layout Components
 import { Sidebar } from './components/layout/Sidebar.tsx';
 import { Navbar } from './components/layout/Navbar.tsx';
 import { RightPlayerPanel } from './components/layout/RightPlayerPanel.tsx';
 import { BottomPlayerBar } from './components/layout/BottomPlayerBar.tsx';
 import { MobileNav } from './components/layout/MobileNav.tsx';
-import { AuthModal } from './components/modals/AuthModal.tsx';
-import { CreatePlaylistModal } from './components/modals/CreatePlaylistModal.tsx';
-import { AddToPlaylistModal } from './components/modals/AddToPlaylistModal.tsx';
-import { Track } from './types/music.ts';
+
+// Views
 import { HomeView } from './views/HomeView.tsx';
 import { SearchView } from './views/SearchView.tsx';
 import { LibraryView } from './views/LibraryView.tsx';
 import { LikedSongsView } from './views/LikedSongsView.tsx';
-import { SettingsView } from './views/SettingsView.tsx';
-import { LyricsView } from './views/LyricsView.tsx';
 import { ArtistView } from './views/ArtistView.tsx';
+import { AlbumView } from './views/AlbumView.tsx';
 import { PlaylistView } from './views/PlaylistView.tsx';
-import { getUserPlaylists } from './services/firebase.ts';
+import { LyricsView } from './views/LyricsView.tsx';
+import { SettingsView } from './views/SettingsView.tsx';
 
-function SoundWaveMain() {
+// Modals
+import { AuthModal } from './components/modals/AuthModal.tsx';
+import { CreatePlaylistModal } from './components/modals/CreatePlaylistModal.tsx';
+import { AddToPlaylistModal } from './components/modals/AddToPlaylistModal.tsx';
+
+const AppContent: React.FC = () => {
   const { user } = useAuth();
+
+  // Navigation State
   const [currentView, setCurrentView] = useState<ViewType>('home');
-  const [viewPayload, setViewPayload] = useState<any>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [navPayload, setNavPayload] = useState<any>({});
+  const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Mobile sidebar drawer state
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [createPlaylistOpen, setCreatePlaylistOpen] = useState(false);
-  const [addToPlaylistTrack, setAddToPlaylistTrack] = useState<Track | null>(null);
+
+  // Playlists state from Firestore
   const [userPlaylists, setUserPlaylists] = useState<Playlist[]>([]);
+  const [refreshCounter, setRefreshCounter] = useState(0);
 
-  // Fetch user playlists from Firestore
-  const fetchPlaylists = async () => {
-    if (user) {
-      try {
-        const playlists = await getUserPlaylists(user.uid);
-        setUserPlaylists(playlists);
-      } catch (e) {
-        console.warn('Playlists fetch notice:', e);
-      }
-    } else {
-      setUserPlaylists([]);
-    }
-  };
+  // Modal States
+  const [createPlaylistOpen, setCreatePlaylistOpen] = useState(false);
+  const [addToPlaylistOpen, setAddToPlaylistOpen] = useState(false);
+  const [trackToAddToPlaylist, setTrackToAddToPlaylist] = useState<Track | null>(null);
 
+  // Subscribe to real-time user playlists from Firestore
   useEffect(() => {
-    fetchPlaylists();
-  }, [user]);
+    if (!user) {
+      setUserPlaylists([]);
+      return;
+    }
+
+    const unsubscribe = subscribeUserPlaylists(user.uid, (playlists) => {
+      setUserPlaylists(playlists);
+    });
+
+    return () => unsubscribe();
+  }, [user, refreshCounter]);
 
   const handleNavigate = (view: ViewType, payload?: any) => {
     setCurrentView(view);
-    setViewPayload(payload || null);
+    if (view !== 'search') {
+      setSearchQuery('');
+    }
+    if (payload !== undefined) {
+      setNavPayload(payload);
+    }
     setMobileMenuOpen(false);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleSearchSubmit = (query: string) => {
     setSearchQuery(query);
-    handleNavigate('search', { query });
+    setCurrentView('search');
+    setNavPayload({ initialQuery: query });
+    setMobileMenuOpen(false);
+  };
+
+  const handleOpenAddToPlaylist = (track: Track) => {
+    setTrackToAddToPlaylist(track);
+    setAddToPlaylistOpen(true);
+  };
+
+  const handlePlaylistCreated = (playlist: Playlist) => {
+    setRefreshCounter(prev => prev + 1);
+    handleNavigate('playlist', {
+      playlistId: playlist.id,
+      initialPlaylist: playlist,
+      name: playlist.name,
+    });
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#0a0c10] text-zinc-100 font-['Plus_Jakarta_Sans',sans-serif]">
-      {/* Desktop Left Sidebar */}
-      <Sidebar
-        currentView={currentView}
-        onNavigate={handleNavigate}
-        userPlaylists={userPlaylists}
-        onOpenCreatePlaylist={() => setCreatePlaylistOpen(true)}
-        className="hidden md:flex"
-      />
+    <div className="h-screen w-screen flex flex-col bg-[#0a0d14] text-white overflow-hidden font-['Plus_Jakarta_Sans',sans-serif] antialiased select-none">
+      {/* Main App Layout */}
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Desktop Sidebar */}
+        <Sidebar
+          currentView={currentView}
+          onNavigate={handleNavigate}
+          userPlaylists={userPlaylists}
+          onOpenCreatePlaylist={() => setCreatePlaylistOpen(true)}
+          className="hidden md:flex"
+        />
 
-      {/* Mobile Drawer Overlay */}
-      {mobileMenuOpen && (
-        <div className="fixed inset-0 z-50 flex md:hidden">
-          <div 
-            className="fixed inset-0 bg-black/70 backdrop-blur-xs" 
-            onClick={() => setMobileMenuOpen(false)}
-          />
-          <Sidebar
+        {/* Mobile Slide-in Drawer */}
+        {mobileMenuOpen && (
+          <div className="fixed inset-0 z-50 flex md:hidden">
+            <div
+              className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity"
+              onClick={() => setMobileMenuOpen(false)}
+            />
+            <div className="relative flex-1 flex flex-col max-w-xs w-full bg-[#0e1116] z-10 shadow-2xl">
+              <Sidebar
+                currentView={currentView}
+                onNavigate={handleNavigate}
+                userPlaylists={userPlaylists}
+                onOpenCreatePlaylist={() => {
+                  setMobileMenuOpen(false);
+                  setCreatePlaylistOpen(true);
+                }}
+                className="w-full h-full"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Center Main Stage */}
+        <main className="flex-1 flex flex-col min-w-0 bg-[#0a0d14] overflow-hidden relative">
+          <Navbar
             currentView={currentView}
             onNavigate={handleNavigate}
-            userPlaylists={userPlaylists}
-            onOpenCreatePlaylist={() => {
-              setMobileMenuOpen(false);
-              setCreatePlaylistOpen(true);
-            }}
-            className="relative z-10 w-72 h-full shadow-2xl"
+            onSearchSubmit={handleSearchSubmit}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            onToggleMobileMenu={() => setMobileMenuOpen(prev => !prev)}
           />
-        </div>
-      )}
 
-      {/* Center Main Stage */}
-      <main className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-[#0b0e14]">
-        {/* Sticky Top Navbar */}
-        <Navbar
-          currentView={currentView}
+          {/* Dynamic Content Views */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col relative">
+            {currentView === 'home' && (
+              <HomeView
+                onNavigate={handleNavigate}
+                onOpenCreatePlaylist={() => setCreatePlaylistOpen(true)}
+              />
+            )}
+
+            {currentView === 'search' && (
+              <SearchView
+                initialQuery={navPayload.initialQuery || searchQuery}
+                onNavigate={handleNavigate}
+                onOpenAddToPlaylist={handleOpenAddToPlaylist}
+              />
+            )}
+
+            {currentView === 'library' && (
+              <LibraryView
+                onNavigate={handleNavigate}
+                userPlaylists={userPlaylists}
+                onOpenCreatePlaylist={() => setCreatePlaylistOpen(true)}
+                onRefreshPlaylists={() => setRefreshCounter(prev => prev + 1)}
+              />
+            )}
+
+            {currentView === 'liked' && (
+              <LikedSongsView onNavigate={handleNavigate} />
+            )}
+
+            {currentView === 'artist' && (
+              <ArtistView
+                artistName={navPayload.artistName || 'Artist'}
+                artistId={navPayload.artistId}
+                onNavigate={handleNavigate}
+              />
+            )}
+
+            {currentView === 'album' && (
+              <AlbumView
+                albumId={navPayload.albumId || ''}
+                albumTitle={navPayload.albumTitle}
+                artistName={navPayload.artistName}
+                onNavigate={handleNavigate}
+              />
+            )}
+
+            {currentView === 'playlist' && (
+              <PlaylistView
+                playlistId={navPayload.playlistId || ''}
+                initialPlaylist={navPayload.initialPlaylist}
+                name={navPayload.name}
+                onNavigate={handleNavigate}
+                onRefreshPlaylists={() => setRefreshCounter(prev => prev + 1)}
+              />
+            )}
+
+            {currentView === 'lyrics' && (
+              <LyricsView onNavigate={handleNavigate} />
+            )}
+
+            {currentView === 'settings' && (
+              <SettingsView onNavigate={handleNavigate} />
+            )}
+          </div>
+        </main>
+
+        {/* Right Player & Queue Panel (Desktop Large Screens) */}
+        <RightPlayerPanel
           onNavigate={handleNavigate}
-          onSearchSubmit={handleSearchSubmit}
-          searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
-          onToggleMobileMenu={() => setMobileMenuOpen(true)}
+          onOpenAddToPlaylist={handleOpenAddToPlaylist}
+          className="hidden xl:flex"
         />
+      </div>
 
-        {/* Dynamic View Content Area */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar pb-24 md:pb-8">
-          {currentView === 'home' && (
-            <HomeView 
-              onNavigate={handleNavigate}
-              onOpenCreatePlaylist={() => setCreatePlaylistOpen(true)}
-            />
-          )}
+      {/* Bottom Audio Player Bar */}
+      <BottomPlayerBar onNavigate={handleNavigate} />
 
-          {currentView === 'search' && (
-            <SearchView 
-              initialQuery={viewPayload?.query || searchQuery}
-              onNavigate={handleNavigate}
-              onOpenAddToPlaylist={(track) => setAddToPlaylistTrack(track)}
-            />
-          )}
-
-          {currentView === 'library' && (
-            <LibraryView 
-              onNavigate={handleNavigate}
-              userPlaylists={userPlaylists}
-              onOpenCreatePlaylist={() => setCreatePlaylistOpen(true)}
-              onRefreshPlaylists={fetchPlaylists}
-            />
-          )}
-
-          {currentView === 'liked' && (
-            <LikedSongsView 
-              onNavigate={handleNavigate}
-            />
-          )}
-
-          {currentView === 'settings' && (
-            <SettingsView 
-              onNavigate={handleNavigate}
-            />
-          )}
-
-          {currentView === 'lyrics' && (
-            <LyricsView 
-              onNavigate={handleNavigate}
-            />
-          )}
-
-          {currentView === 'artist' && (
-            <ArtistView 
-              artistName={viewPayload?.name || 'Billie Eilish'}
-              onNavigate={handleNavigate}
-            />
-          )}
-
-          {currentView === 'playlist' && (
-            <PlaylistView 
-              playlistId={viewPayload?.id || 'curated_discover'}
-              initialPlaylist={viewPayload?.playlist}
-              name={viewPayload?.name}
-              onNavigate={handleNavigate}
-              onRefreshPlaylists={fetchPlaylists}
-            />
-          )}
-        </div>
-
-        {/* Mobile / Tablet Bottom Player Bar */}
-        <BottomPlayerBar 
-          onNavigate={handleNavigate} 
-          className="xl:hidden"
-        />
-
-        {/* Mobile Bottom Navigation */}
-        <MobileNav 
-          currentView={currentView}
-          onNavigate={handleNavigate}
-        />
-      </main>
-
-      {/* Desktop Right Player Panel (Matches Reference UI) */}
-      <RightPlayerPanel 
-        onNavigate={handleNavigate}
-        onOpenAddToPlaylist={(track) => setAddToPlaylistTrack(track)}
-        className="hidden xl:flex"
-      />
+      {/* Mobile Navigation Tabs */}
+      <MobileNav currentView={currentView} onNavigate={handleNavigate} />
 
       {/* Modals */}
       <AuthModal />
+
       <CreatePlaylistModal
         isOpen={createPlaylistOpen}
         onClose={() => setCreatePlaylistOpen(false)}
-        onPlaylistCreated={(newPl) => {
-          setUserPlaylists(prev => [newPl, ...prev]);
-          handleNavigate('playlist', { id: newPl.id, playlist: newPl, name: newPl.name });
-        }}
+        onPlaylistCreated={handlePlaylistCreated}
       />
+
       <AddToPlaylistModal
-        isOpen={!!addToPlaylistTrack}
-        track={addToPlaylistTrack}
+        isOpen={addToPlaylistOpen}
+        onClose={() => {
+          setAddToPlaylistOpen(false);
+          setTrackToAddToPlaylist(null);
+        }}
+        track={trackToAddToPlaylist}
         userPlaylists={userPlaylists}
-        onClose={() => setAddToPlaylistTrack(null)}
         onOpenCreatePlaylist={() => {
-          setAddToPlaylistTrack(null);
+          setAddToPlaylistOpen(false);
           setCreatePlaylistOpen(true);
         }}
-        onRefreshPlaylists={fetchPlaylists}
+        onRefreshPlaylists={() => setRefreshCounter(prev => prev + 1)}
       />
     </div>
   );
-}
+};
 
 export default function App() {
   return (
     <AuthProvider>
       <PlayerProvider>
-        <SoundWaveMain />
+        <AppContent />
       </PlayerProvider>
     </AuthProvider>
   );

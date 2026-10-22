@@ -6,14 +6,10 @@ import {
   Heart, 
   Plus, 
   Music2, 
-  Sparkles, 
-  Flame, 
-  Dumbbell, 
   ChevronDown, 
   LogOut, 
   Settings, 
-  User as UserIcon,
-  Radio
+  FolderPlus
 } from 'lucide-react';
 import { ViewType, Playlist } from '../../types/music.ts';
 import { useAuth } from '../../context/AuthContext.tsx';
@@ -34,17 +30,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenCreatePlaylist,
   className = ''
 }) => {
-  const { user, userProfile, logout, openAuthModal } = useAuth();
+  const { user, logout, openAuthModal } = useAuth();
   const { likedTrackIds } = usePlayer();
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-
-  // Preset curated playlists matching reference UI
-  const defaultPlaylists = [
-    { id: 'curated_discover', name: 'Discover Weekly', icon: Sparkles, color: 'text-purple-400' },
-    { id: 'curated_chill', name: 'Chill Vibes', icon: Music2, color: 'text-blue-400' },
-    { id: 'curated_indie', name: 'Indie Mix', icon: Radio, color: 'text-amber-400' },
-    { id: 'curated_workout', name: 'Workout', icon: Dumbbell, color: 'text-rose-400' },
-  ];
 
   return (
     <aside 
@@ -52,7 +40,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       aria-label="SoundWave Primary Sidebar"
     >
       <div className="flex flex-col flex-1 overflow-y-auto custom-scrollbar">
-        {/* Logo Lockup matching reference design */}
+        {/* Logo Lockup */}
         <div className="px-6 pt-6 pb-5 flex items-center gap-3">
           <div className="flex items-end gap-1 h-6">
             <span className="w-1.5 h-3.5 bg-emerald-400 rounded-full animate-pulse" />
@@ -132,23 +120,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
             )}
           </button>
 
-          {/* Curated/Preset Playlists */}
-          {defaultPlaylists.map(item => (
-            <button
-              key={item.id}
-              onClick={() => onNavigate('playlist', { id: item.id, name: item.name })}
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-white hover:bg-[#151922] transition-colors truncate text-left"
-            >
-              <item.icon className={`w-4 h-4 shrink-0 ${item.color}`} />
-              <span className="truncate">{item.name}</span>
-            </button>
-          ))}
-
-          {/* User Custom Playlists from Firestore */}
+          {/* Real User Playlists from Firestore (ZERO dummy items) */}
           {userPlaylists.map(pl => (
             <button
               key={pl.id}
-              onClick={() => onNavigate('playlist', { id: pl.id, playlist: pl })}
+              onClick={() => onNavigate('playlist', { id: pl.id, playlist: pl, name: pl.name })}
               className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-white hover:bg-[#151922] transition-colors truncate text-left"
             >
               <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
@@ -156,7 +132,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           ))}
 
-          {/* Create Playlist Button */}
+          {/* Create Playlist Action */}
           <button
             onClick={onOpenCreatePlaylist}
             className="w-full flex items-center gap-3 px-3 py-2.5 mt-2 rounded-lg text-sm text-zinc-400 hover:text-emerald-400 hover:bg-[#151922] transition-all group font-medium"
@@ -169,7 +145,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* User Profile Footer Widget (Exact reference design) */}
+      {/* User Profile Footer Widget */}
       <div className="p-3 border-t border-[#1a1f29] relative">
         {user ? (
           <div>
@@ -185,17 +161,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 />
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-white truncate leading-snug">
-                    {user.displayName || user.email?.split('@')[0] || 'Mallss'}
+                    {user.displayName || user.email?.split('@')[0] || 'User'}
                   </p>
                   <p className="text-[11px] text-zinc-400 truncate">
-                    {user.email || 'SoundWave Member'}
+                    {user.email}
                   </p>
                 </div>
               </div>
               <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${profileMenuOpen ? 'rotate-180' : ''}`} />
             </button>
 
-            {/* Profile Popup Menu */}
+            {/* Profile Dropdown */}
             {profileMenuOpen && (
               <div className="absolute bottom-16 left-3 right-3 bg-[#161a22] border border-zinc-700/50 rounded-xl shadow-2xl p-1.5 z-50 space-y-0.5">
                 <button

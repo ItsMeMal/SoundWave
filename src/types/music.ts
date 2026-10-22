@@ -19,7 +19,7 @@ export interface Track {
   thumbnails?: TrackThumbnail[];
   duration: number; // in seconds
   streamUrl?: string;
-  source?: 'api' | 'custom' | 'liked';
+  source?: 'api' | 'custom' | 'liked' | 'history';
 }
 
 export interface Playlist {
@@ -47,12 +47,22 @@ export interface LikedTrackItem {
   likedAt: string;
 }
 
+export interface PlaybackHistoryItem {
+  id: string;
+  videoId: string;
+  userId: string;
+  title: string;
+  artist: string;
+  thumbnailUrl: string;
+  duration?: number;
+  playedAt: string;
+}
+
 export interface UserProfile {
   uid: string;
   email: string;
   displayName: string;
   photoURL?: string;
-  plan?: 'Free' | 'Premium';
   createdAt?: string;
   updatedAt?: string;
 }
@@ -74,6 +84,26 @@ export interface LyricsResponse {
   id: string;
   source: string;
   lyrics: string;
+}
+
+export interface ArtistDetail {
+  id: string;
+  name: string;
+  subscribers?: string;
+  description?: string;
+  thumbnails?: { url: string }[];
+  topTracks: Track[];
+  albums?: any[];
+}
+
+export interface AlbumDetail {
+  id: string;
+  title: string;
+  artist: string;
+  year?: string;
+  coverUrl?: string;
+  trackCount?: number;
+  tracks: Track[];
 }
 
 export type ViewType = 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Bell, X, User as UserIcon, Menu } from 'lucide-react';
+import { Search, Bell, X, Menu } from 'lucide-react';
 import { ViewType } from '../../types/music.ts';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { getSuggestions } from '../../services/musicApi.ts';
@@ -45,7 +45,6 @@ export const Navbar: React.FC<NavbarProps> = ({
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Click outside to close suggestions
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) {
@@ -80,11 +79,18 @@ export const Navbar: React.FC<NavbarProps> = ({
         >
           <Menu className="w-5 h-5" />
         </button>
-        <span className="font-bold text-lg text-white">SoundWave</span>
+        <div className="flex items-center gap-2">
+          <div className="flex items-end gap-1 h-5">
+            <span className="w-1 h-3 bg-emerald-400 rounded-full" />
+            <span className="w-1 h-5 bg-emerald-400 rounded-full" />
+            <span className="w-1 h-3.5 bg-emerald-400 rounded-full" />
+          </div>
+          <span className="font-bold text-base text-white">SoundWave</span>
+        </div>
       </div>
 
-      {/* Center / Left Search Bar (Exact Reference Design) */}
-      <div className="relative flex-1 max-w-xl hidden sm:block" ref={searchBoxRef}>
+      {/* Center Search Bar */}
+      <div className="relative flex-1 max-w-xl mx-2 sm:mx-4" ref={searchBoxRef}>
         <div className="flex items-center bg-[#151922] border border-[#232936] rounded-full px-4 py-2 focus-within:border-emerald-500/60 focus-within:ring-1 focus-within:ring-emerald-500/30 transition-all">
           <Search className="w-4 h-4 text-zinc-400 shrink-0 mr-3" />
           <input

@@ -53,7 +53,7 @@ export const AuthModal: React.FC = () => {
         setSuccessMsg('Password reset instructions have been sent to your email.');
       }
     } catch (err: any) {
-      console.error('Auth error:', err);
+      console.warn('Auth notice:', err.message);
       let msg = err.message || 'An error occurred during authentication.';
       if (msg.includes('auth/invalid-credential') || msg.includes('auth/wrong-password')) {
         msg = 'Invalid email or password.';
@@ -84,8 +84,7 @@ export const AuthModal: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="relative w-full max-w-4xl bg-[#131720] border border-[#222838] rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row min-h-[560px]">
-        {/* Close Button */}
+      <div className="relative w-full max-w-4xl bg-[#131720] border border-[#222838] rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row min-h-[540px]">
         <button
           onClick={closeAuthModal}
           className="absolute top-4 right-4 z-10 p-2 text-zinc-400 hover:text-white rounded-full bg-black/40 hover:bg-black/70 transition-colors"
@@ -94,7 +93,7 @@ export const AuthModal: React.FC = () => {
           <X className="w-5 h-5" />
         </button>
 
-        {/* Left Visual Artwork Panel (matching reference design) */}
+        {/* Left Visual Artwork Panel */}
         <div className="hidden md:block md:w-5/12 relative overflow-hidden bg-zinc-950">
           <img
             src="https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800&q=80"
@@ -112,14 +111,13 @@ export const AuthModal: React.FC = () => {
               SoundWave
             </h3>
             <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
-              Experience sound reimagined. Unlimited streaming, high fidelity audio, and synchronized lyrics.
+              Experience sound reimagined. Unlimited streaming, high fidelity audio, and verified lyrics.
             </p>
           </div>
         </div>
 
         {/* Right Form Panel */}
         <div className="w-full md:w-7/12 p-8 md:p-10 flex flex-col justify-center">
-          {/* Header Lockup */}
           <div className="flex items-center gap-2 mb-2">
             <div className="flex items-end gap-1 h-5">
               <span className="w-1 h-3 bg-emerald-400 rounded-full" />
@@ -140,7 +138,6 @@ export const AuthModal: React.FC = () => {
             {authModalTab === 'forgot' && 'Enter your email and we will send you a password reset link.'}
           </p>
 
-          {/* Feedback Alerts */}
           {errorMsg && (
             <div className="mt-4 p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-400">
               {errorMsg}
@@ -152,7 +149,6 @@ export const AuthModal: React.FC = () => {
             </div>
           )}
 
-          {/* Form */}
           <form onSubmit={handleSubmit} className="mt-5 space-y-3.5">
             {authModalTab === 'register' && (
               <div>
@@ -209,7 +205,6 @@ export const AuthModal: React.FC = () => {
               </div>
             )}
 
-            {/* Remember me & Forgot Password */}
             {authModalTab === 'login' && (
               <div className="flex items-center justify-between text-xs pt-1">
                 <label className="flex items-center gap-2 text-zinc-400 cursor-pointer">
@@ -231,7 +226,6 @@ export const AuthModal: React.FC = () => {
               </div>
             )}
 
-            {/* Mint Green Action Button */}
             <button
               type="submit"
               disabled={submitting}
@@ -246,7 +240,6 @@ export const AuthModal: React.FC = () => {
             </button>
           </form>
 
-          {/* Social Divider */}
           {authModalTab !== 'forgot' && (
             <>
               <div className="relative my-4">
@@ -260,7 +253,6 @@ export const AuthModal: React.FC = () => {
                 </div>
               </div>
 
-              {/* Google Button */}
               <button
                 type="button"
                 onClick={handleGoogleSignIn}
@@ -290,7 +282,6 @@ export const AuthModal: React.FC = () => {
             </>
           )}
 
-          {/* Switch Tab Links */}
           <div className="mt-5 text-center text-xs text-zinc-400">
             {authModalTab === 'login' && (
               <p>

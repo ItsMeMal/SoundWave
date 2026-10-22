@@ -1,5 +1,5 @@
 import React from 'react';
-import { Heart, Play, Shuffle, Clock, Music } from 'lucide-react';
+import { Heart, Play, Clock, Music } from 'lucide-react';
 import { ViewType, Track } from '../types/music.ts';
 import { usePlayer } from '../context/PlayerContext.tsx';
 import { formatTime } from '../utils/formatters.ts';

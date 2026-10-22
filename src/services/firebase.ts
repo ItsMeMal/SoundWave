@@ -8,14 +8,12 @@ import {
   sendPasswordResetEmail,
   signOut,
   updateProfile,
-  onAuthStateChanged,
-  User
+  User 
 } from 'firebase/auth';
 import { 
   getFirestore, 
   doc, 
   getDoc, 
-  getDocFromServer,
   setDoc, 
   deleteDoc, 
   collection, 
@@ -24,10 +22,10 @@ import {
   query, 
   orderBy, 
   limit, 
-  serverTimestamp 
+  Unsubscribe 
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Track, Playlist, LikedTrackItem, UserProfile, UserSettings } from '../types/music.ts';
+import { Track, Playlist, LikedTrackItem, PlaybackHistoryItem, UserProfile, UserSettings } from '../types/music.ts';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
@@ -43,52 +41,14 @@ export enum OperationType {
   WRITE = 'write',
 }
 
-export interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
-  };
-}
-
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
+  const errInfo = {
     error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(p => ({
-        providerId: p.providerId,
-        email: p.email,
-      })) || []
-    },
+    userId: auth.currentUser?.uid,
     operationType,
     path
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
-
-export async function testFirestoreConnection() {
-  // Graceful passive connection check
-  try {
-    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000));
-    await Promise.race([getDocFromServer(doc(db, 'test', 'connection')), timeoutPromise]);
-  } catch {
-    // Normal during initial boot or offline state
-  }
+  console.warn('Firestore Notice:', JSON.stringify(errInfo));
 }
 
 // User Profile Operations
@@ -99,7 +59,6 @@ export async function syncUserProfile(user: User): Promise<UserProfile> {
     email: user.email || '',
     displayName: user.displayName || user.email?.split('@')[0] || 'User',
     photoURL: user.photoURL || '',
-    plan: 'Premium',
     updatedAt: new Date().toISOString()
   };
 
@@ -118,17 +77,21 @@ export async function syncUserProfile(user: User): Promise<UserProfile> {
   }
 }
 
-// Liked Tracks
-export async function getLikedTracks(userId: string): Promise<LikedTrackItem[]> {
-  const path = `users/${userId}/likedTracks`;
-  try {
-    const q = query(collection(db, 'users', userId, 'likedTracks'), orderBy('likedAt', 'desc'));
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => d.data() as LikedTrackItem);
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, path);
-    return [];
-  }
+// Liked Tracks with Realtime onSnapshot Listener
+export function subscribeLikedTracks(
+  userId: string, 
+  onUpdate: (tracks: LikedTrackItem[]) => void
+): Unsubscribe {
+  const q = query(
+    collection(db, 'users', userId, 'likedTracks'), 
+    orderBy('likedAt', 'desc')
+  );
+  return onSnapshot(q, (snapshot) => {
+    const items = snapshot.docs.map(d => d.data() as LikedTrackItem);
+    onUpdate(items);
+  }, (err) => {
+    handleFirestoreError(err, OperationType.LIST, `users/${userId}/likedTracks`);
+  });
 }
 
 export async function addLikedTrack(userId: string, track: Track): Promise<void> {
@@ -160,17 +123,21 @@ export async function removeLikedTrack(userId: string, trackId: string): Promise
   }
 }
 
-// User Playlists
-export async function getUserPlaylists(userId: string): Promise<Playlist[]> {
-  const path = `users/${userId}/playlists`;
-  try {
-    const q = query(collection(db, 'users', userId, 'playlists'), orderBy('updatedAt', 'desc'));
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => d.data() as Playlist);
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, path);
-    return [];
-  }
+// Playlists with Realtime onSnapshot Listener
+export function subscribeUserPlaylists(
+  userId: string, 
+  onUpdate: (playlists: Playlist[]) => void
+): Unsubscribe {
+  const q = query(
+    collection(db, 'users', userId, 'playlists'), 
+    orderBy('updatedAt', 'desc')
+  );
+  return onSnapshot(q, (snapshot) => {
+    const items = snapshot.docs.map(d => d.data() as Playlist);
+    onUpdate(items);
+  }, (err) => {
+    handleFirestoreError(err, OperationType.LIST, `users/${userId}/playlists`);
+  });
 }
 
 export async function createFirestorePlaylist(
@@ -252,7 +219,24 @@ export async function deleteUserPlaylist(userId: string, playlistId: string): Pr
   }
 }
 
-// History
+// History with Realtime onSnapshot Listener
+export function subscribePlaybackHistory(
+  userId: string, 
+  onUpdate: (history: PlaybackHistoryItem[]) => void
+): Unsubscribe {
+  const q = query(
+    collection(db, 'users', userId, 'history'), 
+    orderBy('playedAt', 'desc'),
+    limit(20)
+  );
+  return onSnapshot(q, (snapshot) => {
+    const items = snapshot.docs.map(d => d.data() as PlaybackHistoryItem);
+    onUpdate(items);
+  }, (err) => {
+    handleFirestoreError(err, OperationType.LIST, `users/${userId}/history`);
+  });
+}
+
 export async function addPlaybackHistory(userId: string, track: Track): Promise<void> {
   const path = `users/${userId}/history/${track.id}`;
   try {
@@ -263,6 +247,7 @@ export async function addPlaybackHistory(userId: string, track: Track): Promise<
       title: track.title,
       artist: track.artist,
       thumbnailUrl: track.thumbnailUrl,
+      duration: track.duration,
       playedAt: new Date().toISOString()
     });
   } catch (err) {
@@ -270,7 +255,7 @@ export async function addPlaybackHistory(userId: string, track: Track): Promise<
   }
 }
 
-// Settings
+// User Settings
 export async function getUserSettings(userId: string): Promise<UserSettings | null> {
   const path = `users/${userId}/settings/preferences`;
   try {

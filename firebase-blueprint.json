@@ -2,13 +2,13 @@
   "entities": {
     "UserProfile": {
       "title": "UserProfile",
-      "description": "User profile information and general metadata",
+      "description": "User profile information",
       "type": "object",
       "properties": {
-        "uid": { "type": "string", "maxLength": 128 },
-        "email": { "type": "string", "maxLength": 256 },
-        "displayName": { "type": "string", "maxLength": 128 },
-        "photoURL": { "type": "string", "maxLength": 1024 },
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
         "createdAt": { "type": "string" },
         "updatedAt": { "type": "string" }
       },
@@ -19,11 +19,11 @@
       "description": "User created music playlist",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "maxLength": 128 },
-        "userId": { "type": "string", "maxLength": 128 },
-        "name": { "type": "string", "maxLength": 120 },
-        "description": { "type": "string", "maxLength": 500 },
-        "coverUrl": { "type": "string", "maxLength": 1024 },
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "coverUrl": { "type": "string" },
         "trackCount": { "type": "number" },
         "tracks": { "type": "array" },
         "createdAt": { "type": "string" },
@@ -36,13 +36,13 @@
       "description": "Favorite or liked track metadata",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "maxLength": 128 },
-        "videoId": { "type": "string", "maxLength": 128 },
-        "userId": { "type": "string", "maxLength": 128 },
-        "title": { "type": "string", "maxLength": 256 },
-        "artist": { "type": "string", "maxLength": 256 },
-        "album": { "type": "string", "maxLength": 256 },
-        "thumbnailUrl": { "type": "string", "maxLength": 1024 },
+        "id": { "type": "string" },
+        "videoId": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "artist": { "type": "string" },
+        "album": { "type": "string" },
+        "thumbnailUrl": { "type": "string" },
         "duration": { "type": "number" },
         "likedAt": { "type": "string" }
       },
@@ -53,12 +53,12 @@
       "description": "User playback history entry",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "maxLength": 128 },
-        "videoId": { "type": "string", "maxLength": 128 },
-        "userId": { "type": "string", "maxLength": 128 },
-        "title": { "type": "string", "maxLength": 256 },
-        "artist": { "type": "string", "maxLength": 256 },
-        "thumbnailUrl": { "type": "string", "maxLength": 1024 },
+        "id": { "type": "string" },
+        "videoId": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "artist": { "type": "string" },
+        "thumbnailUrl": { "type": "string" },
         "playedAt": { "type": "string" }
       },
       "required": ["id", "videoId", "userId", "title"]
@@ -68,11 +68,11 @@
       "description": "User application preferences and settings",
       "type": "object",
       "properties": {
-        "playbackQuality": { "type": "string", "enum": ["Low", "Normal", "High", "Lossless"] },
-        "downloadQuality": { "type": "string", "enum": ["Low", "Normal", "High"] },
+        "playbackQuality": { "type": "string" },
+        "downloadQuality": { "type": "string" },
         "autoplay": { "type": "boolean" },
-        "theme": { "type": "string", "enum": ["dark", "light", "system"] },
-        "language": { "type": "string", "maxLength": 10 },
+        "theme": { "type": "string" },
+        "language": { "type": "string" },
         "updatedAt": { "type": "string" }
       }
     }
@@ -96,7 +96,7 @@
     },
     "/users/{userId}/settings/{settingId}": {
       "schema": "UserSettings",
-      "description": "User preferences and config"
+      "description": "User preferences"
     }
   }
 }

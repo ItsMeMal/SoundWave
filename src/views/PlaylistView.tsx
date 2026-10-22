@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Play, Pause, Heart, Clock, Trash2, Plus, Music, Loader2 } from 'lucide-react';
+import { ArrowLeft, Play, Pause, Heart, Clock, Trash2, Plus, Music, Loader2, AlertCircle, RotateCcw } from 'lucide-react';
 import { ViewType, Playlist, Track } from '../types/music.ts';
 import { usePlayer } from '../context/PlayerContext.tsx';
 import { formatTime } from '../utils/formatters.ts';
-import { searchMusic } from '../services/musicApi.ts';
+import { getBrowsePlaylist, searchMusic } from '../services/musicApi.ts';
 import { removeTrackFromUserPlaylist } from '../services/firebase.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 
@@ -26,39 +26,48 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
   const { playTrack, currentTrack, isPlaying, togglePlay, toggleLike, isLiked } = usePlayer();
   const [playlist, setPlaylist] = useState<Playlist | null>(initialPlaylist || null);
   const [loading, setLoading] = useState(!initialPlaylist);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let isMounted = true;
-    async function loadTracks() {
-      if (initialPlaylist && initialPlaylist.tracks && initialPlaylist.tracks.length > 0) {
-        setPlaylist(initialPlaylist);
+  const loadPlaylist = async () => {
+    if (initialPlaylist && initialPlaylist.tracks) {
+      setPlaylist(initialPlaylist);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      // 1. Try browse playlist endpoint from API
+      const apiPl = await getBrowsePlaylist(playlistId);
+      if (apiPl && apiPl.tracks.length > 0) {
+        setPlaylist(apiPl);
         setLoading(false);
         return;
       }
 
-      setLoading(true);
-      try {
-        const queryTerm = name || initialPlaylist?.name || 'Top hits';
-        const res = await searchMusic(queryTerm, 18);
-        if (isMounted) {
-          setPlaylist({
-            id: playlistId,
-            name: name || initialPlaylist?.name || 'Playlist',
-            description: initialPlaylist?.description || `A curated collection of ${queryTerm} vibes on SoundWave.`,
-            coverUrl: initialPlaylist?.coverUrl || res.tracks[0]?.thumbnailUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&q=80',
-            trackCount: res.tracks.length,
-            tracks: res.tracks,
-            creator: initialPlaylist?.creator || user?.displayName || 'SoundWave'
-          });
-        }
-      } catch (err) {
-        console.warn('Playlist load notice:', err);
-      } finally {
-        if (isMounted) setLoading(false);
+      // 2. Fallback search by query term if browsing curated topic
+      if (name) {
+        const res = await searchMusic(name, 18);
+        setPlaylist({
+          id: playlistId,
+          name: name,
+          description: `Collection of ${name} tracks on SoundWave.`,
+          coverUrl: res.tracks[0]?.thumbnailUrl || '',
+          trackCount: res.tracks.length,
+          tracks: res.tracks,
+          creator: 'SoundWave'
+        });
       }
+    } catch (err: any) {
+      setError('Unable to load playlist.');
+    } finally {
+      setLoading(false);
     }
-    loadTracks();
-    return () => { isMounted = false; };
+  };
+
+  useEffect(() => {
+    loadPlaylist();
   }, [playlistId, name, initialPlaylist]);
 
   const tracks = playlist?.tracks || [];
@@ -95,9 +104,9 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
 
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center md:items-end gap-6">
           <img
-            src={playlist?.coverUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80'}
+            src={playlist?.coverUrl || tracks[0]?.thumbnailUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80'}
             alt={playlist?.name || 'Playlist'}
-            className="w-44 h-44 rounded-2xl object-cover shadow-2xl shrink-0 border border-zinc-700/50"
+            className="w-44 h-44 rounded-2xl object-cover shadow-2xl shrink-0 border border-zinc-700/50 bg-zinc-800"
           />
 
           <div className="text-center md:text-left flex-1 min-w-0">
@@ -107,11 +116,13 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
             <h1 className="text-2xl md:text-4xl font-extrabold text-white mt-1 tracking-tight font-['Plus_Jakarta_Sans']">
               {playlist?.name || name || 'Playlist'}
             </h1>
-            <p className="text-xs text-zinc-400 mt-2 line-clamp-2">
-              {playlist?.description}
-            </p>
+            {playlist?.description && (
+              <p className="text-xs text-zinc-400 mt-2 line-clamp-2">
+                {playlist.description}
+              </p>
+            )}
             <p className="text-xs text-zinc-500 mt-1">
-              By <span className="text-zinc-300 font-medium">{playlist?.creator || 'Mallss'}</span> • {tracks.length} songs
+              By <span className="text-zinc-300 font-medium">{playlist?.creator || user?.displayName || 'SoundWave'}</span> • {tracks.length} songs
             </p>
 
             {tracks.length > 0 && (
@@ -131,6 +142,21 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
 
       {/* Tracks List */}
       <div className="p-6 md:p-8 max-w-6xl mx-auto">
+        {error && (
+          <div className="mb-4 p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center justify-between text-xs text-rose-300">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-400" />
+              <span>{error}</span>
+            </div>
+            <button
+              onClick={loadPlaylist}
+              className="px-3.5 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 rounded-lg text-white font-medium flex items-center gap-1.5"
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Retry
+            </button>
+          </div>
+        )}
+
         {loading ? (
           <div className="py-16 flex justify-center">
             <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />

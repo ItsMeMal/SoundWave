@@ -5,15 +5,13 @@ import {
   SkipBack, 
   SkipForward, 
   Heart, 
-  ChevronUp, 
   ChevronDown, 
   Volume2, 
   VolumeX, 
   Shuffle, 
   Repeat,
   Repeat1,
-  FileText,
-  X
+  FileText
 } from 'lucide-react';
 import { usePlayer } from '../../context/PlayerContext.tsx';
 import { formatTime } from '../../utils/formatters.ts';
@@ -59,7 +57,6 @@ export const BottomPlayerBar: React.FC<BottomPlayerBarProps> = ({ onNavigate, cl
       <div 
         className={`bg-[#12161f]/95 backdrop-blur-lg border-t border-[#1e2430] px-4 py-2 flex items-center justify-between select-none z-40 transition-all ${className}`}
       >
-        {/* Track Info (Click opens full player on mobile) */}
         <div 
           onClick={() => setExpanded(true)}
           className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
@@ -67,6 +64,9 @@ export const BottomPlayerBar: React.FC<BottomPlayerBarProps> = ({ onNavigate, cl
           <img
             src={currentTrack.thumbnailUrl}
             alt={currentTrack.title}
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = currentTrack.id ? `https://i.ytimg.com/vi/${currentTrack.id}/hqdefault.jpg` : 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=200&q=80';
+            }}
             className="w-11 h-11 rounded-lg object-cover bg-zinc-800 shadow shrink-0"
           />
           <div className="min-w-0 pr-2">
@@ -79,7 +79,6 @@ export const BottomPlayerBar: React.FC<BottomPlayerBarProps> = ({ onNavigate, cl
           </div>
         </div>
 
-        {/* Center Controls */}
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => toggleLike(currentTrack)}
@@ -134,10 +133,9 @@ export const BottomPlayerBar: React.FC<BottomPlayerBarProps> = ({ onNavigate, cl
         </div>
       </div>
 
-      {/* Expanded Full-Screen Player Modal (Mobile / Full View) */}
+      {/* Expanded Full-Screen Player Modal */}
       {expanded && (
         <div className="fixed inset-0 bg-[#0c0f14] z-50 flex flex-col p-6 animate-in slide-in-from-bottom duration-300 select-none overflow-y-auto">
-          {/* Header */}
           <div className="flex items-center justify-between pb-4">
             <button
               onClick={() => setExpanded(false)}
@@ -166,7 +164,6 @@ export const BottomPlayerBar: React.FC<BottomPlayerBarProps> = ({ onNavigate, cl
             </button>
           </div>
 
-          {/* Large Center Art */}
           <div className="my-auto py-6 max-w-sm mx-auto w-full">
             <div className="aspect-square rounded-2xl overflow-hidden shadow-2xl border border-zinc-800">
               <img
@@ -176,7 +173,6 @@ export const BottomPlayerBar: React.FC<BottomPlayerBarProps> = ({ onNavigate, cl
               />
             </div>
 
-            {/* Song Meta */}
             <div className="mt-6 flex items-center justify-between">
               <div className="min-w-0 pr-4">
                 <h2 className="text-xl font-bold text-white truncate">
@@ -222,7 +218,7 @@ export const BottomPlayerBar: React.FC<BottomPlayerBarProps> = ({ onNavigate, cl
               </div>
             </div>
 
-            {/* Primary Controls */}
+            {/* Controls */}
             <div className="mt-6 flex items-center justify-between">
               <button
                 onClick={toggleShuffle}

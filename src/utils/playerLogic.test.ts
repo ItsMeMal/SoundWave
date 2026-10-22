@@ -32,14 +32,10 @@ test('parseLyrics handles timestamped and plain lines', () => {
 });
 
 test('getNextTrackIndex handles standard, repeat one, repeat all and bounds', () => {
-  // Standard next
   assert.equal(getNextTrackIndex(0, 3, 'off', false), 1);
   assert.equal(getNextTrackIndex(1, 3, 'off', false), 2);
-  // Reached end with repeat off
   assert.equal(getNextTrackIndex(2, 3, 'off', false), null);
-  // Reached end with repeat all
   assert.equal(getNextTrackIndex(2, 3, 'all', false), 0);
-  // Repeat one always returns current
   assert.equal(getNextTrackIndex(1, 3, 'one', false), 1);
 });
 

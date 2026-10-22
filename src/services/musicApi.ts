@@ -1,8 +1,8 @@
-import { Track, SearchResult, LyricsResponse, Playlist } from '../types/music.ts';
+import { Track, SearchResult, LyricsResponse, Playlist, ArtistDetail, AlbumDetail } from '../types/music.ts';
 
 const API_PREFIX = '/api/music';
 
-// Client-side in-memory cache for speed and resilience
+// Client-side in-memory cache for speed and resilience (5 minute TTL)
 const clientCache = new Map<string, { data: any; time: number }>();
 
 async function fetchWithFallback(endpoint: string, options: RequestInit = {}): Promise<Response> {
@@ -10,7 +10,7 @@ async function fetchWithFallback(endpoint: string, options: RequestInit = {}): P
   const fullApiPath = cleanPath.startsWith('/api') ? cleanPath : `/api${cleanPath}`;
   const proxyUrl = `${API_PREFIX}${fullApiPath}`;
 
-  // Check client memory cache (5 minute TTL)
+  // Check client memory cache for GET requests
   if (!options.method || options.method === 'GET') {
     const cached = clientCache.get(proxyUrl);
     if (cached && Date.now() - cached.time < 5 * 60 * 1000) {
@@ -57,38 +57,72 @@ async function fetchWithFallback(endpoint: string, options: RequestInit = {}): P
 }
 
 /**
- * Normalizes raw track from API into SoundWave Track format
+ * Normalizes raw track from API into SoundWave Track format based on actual API schema
  */
 export function normalizeTrack(raw: any): Track {
+  if (!raw) {
+    throw new Error('Cannot normalize null or undefined track');
+  }
+
+  const id = raw.id || raw.videoId || '';
+  const title = raw.title || 'Untitled Track';
+
   const artistsList = Array.isArray(raw.artists)
-    ? raw.artists.map((a: any) => ({ name: typeof a === 'string' ? a : a.name || 'Unknown Artist' }))
+    ? raw.artists.map((a: any) => ({
+        name: typeof a === 'string' ? a : a.name || 'Unknown Artist',
+        id: a.id || undefined,
+      }))
     : [{ name: raw.artist || 'Unknown Artist' }];
 
   const artistName = artistsList.map((a: { name: string }) => a.name).join(', ') || 'Unknown Artist';
 
-  let thumb = 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=500&q=80';
+  let thumb = id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=500&q=80';
   if (Array.isArray(raw.thumbnails) && raw.thumbnails.length > 0) {
-    thumb = raw.thumbnails[raw.thumbnails.length - 1].url || raw.thumbnails[0].url;
+    const sorted = [...raw.thumbnails].sort((a: any, b: any) => (b.width || 0) - (a.width || 0));
+    const candidate = sorted[0]?.url || raw.thumbnails[0]?.url;
+    if (candidate) thumb = candidate;
   } else if (raw.thumbnail) {
     thumb = typeof raw.thumbnail === 'string' ? raw.thumbnail : raw.thumbnail.url || thumb;
+  }
+
+  if (thumb.includes('googleusercontent.com') && thumb.includes('=w')) {
+    thumb = thumb.replace(/=w\d+-h\d+/, '=w500-h500');
   }
 
   if (thumb && thumb.startsWith('//')) {
     thumb = 'https:' + thumb;
   }
 
+  const duration = typeof raw.duration === 'number' 
+    ? raw.duration 
+    : typeof raw.lengthSeconds === 'number' 
+      ? raw.lengthSeconds 
+      : 180;
+
   return {
-    id: raw.id || raw.videoId || String(Math.random()),
-    title: raw.title || 'Untitled Track',
+    id,
+    title,
     artist: artistName,
     artists: artistsList,
-    album: raw.album?.name || raw.album || '',
+    album: raw.album?.name || (typeof raw.album === 'string' ? raw.album : undefined),
     thumbnailUrl: thumb,
     thumbnails: raw.thumbnails || [{ url: thumb }],
-    duration: typeof raw.duration === 'number' ? raw.duration : 180,
+    duration,
     streamUrl: raw.stream_url || undefined,
     source: 'api'
   };
+}
+
+/**
+ * Health check endpoint
+ */
+export async function checkApiHealth(): Promise<boolean> {
+  try {
+    const res = await fetchWithFallback('/health');
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -100,12 +134,15 @@ export async function searchMusic(query: string, limit: number = 20): Promise<Se
   }
 
   try {
-    const res = await fetchWithFallback(`/api/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+    const res = await fetchWithFallback(`/api/search?q=${encodeURIComponent(query.trim())}&limit=${limit}`);
     if (!res.ok) {
       throw new Error(`Search failed with status ${res.status}`);
     }
     const data = await res.json();
-    const tracks: Track[] = (data.tracks || []).map(normalizeTrack);
+    const tracks: Track[] = (data.tracks || [])
+      .filter((t: any) => t && (t.id || t.videoId))
+      .map(normalizeTrack);
+
     return {
       tracks,
       total: data.total || tracks.length
@@ -123,7 +160,7 @@ export async function getSuggestions(query: string): Promise<string[]> {
   if (!query || query.trim().length < 2) return [];
 
   try {
-    const res = await fetchWithFallback(`/api/suggestions?q=${encodeURIComponent(query)}`);
+    const res = await fetchWithFallback(`/api/suggestions?q=${encodeURIComponent(query.trim())}`);
     if (!res.ok) return [];
     const data = await res.json();
     const list: string[] = [];
@@ -149,6 +186,7 @@ export async function getSuggestions(query: string): Promise<string[]> {
  * Fetch track metadata
  */
 export async function getTrack(videoId: string): Promise<Track | null> {
+  if (!videoId) return null;
   try {
     const res = await fetchWithFallback(`/api/track/${videoId}`);
     if (!res.ok) return null;
@@ -160,9 +198,12 @@ export async function getTrack(videoId: string): Promise<Track | null> {
 }
 
 /**
- * Fetch stream URL from API with fallback formats
+ * Fetch stream URL from API with fallback formats (standard, f=140, f=251)
  */
 export async function getStreamUrl(videoId: string): Promise<string | null> {
+  if (!videoId) return null;
+
+  // 1. Standard format
   try {
     const res = await fetchWithFallback(`/api/stream/${videoId}`);
     if (res.ok) {
@@ -173,11 +214,23 @@ export async function getStreamUrl(videoId: string): Promise<string | null> {
     console.warn(`Initial stream fetch notice for ${videoId}:`, err);
   }
 
+  // 2. Format 140 (M4A audio)
   try {
     const res140 = await fetchWithFallback(`/api/stream/${videoId}?f=140`);
     if (res140.ok) {
       const data140 = await res140.json();
       if (data140.stream_url) return data140.stream_url;
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3. Format 251 (Opus audio)
+  try {
+    const res251 = await fetchWithFallback(`/api/stream/${videoId}?f=251`);
+    if (res251.ok) {
+      const data251 = await res251.json();
+      if (data251.stream_url) return data251.stream_url;
     }
   } catch {
     // ignore
@@ -190,6 +243,7 @@ export async function getStreamUrl(videoId: string): Promise<string | null> {
  * Fetch lyrics
  */
 export async function getLyrics(videoId: string): Promise<LyricsResponse | null> {
+  if (!videoId) return null;
   try {
     const res = await fetchWithFallback(`/api/lyrics/${videoId}`);
     if (!res.ok) return null;
@@ -208,11 +262,14 @@ export async function getLyrics(videoId: string): Promise<LyricsResponse | null>
  * Fetch related tracks
  */
 export async function getRelatedTracks(videoId: string): Promise<Track[]> {
+  if (!videoId) return [];
   try {
     const res = await fetchWithFallback(`/api/related/${videoId}`);
     if (!res.ok) return [];
     const data = await res.json();
-    return (data.tracks || []).map(normalizeTrack);
+    return (data.tracks || [])
+      .filter((t: any) => t && (t.id || t.videoId))
+      .map(normalizeTrack);
   } catch {
     return [];
   }
@@ -222,30 +279,37 @@ export async function getRelatedTracks(videoId: string): Promise<Track[]> {
  * Fetch up next tracks
  */
 export async function getNextTracks(videoId: string): Promise<Track[]> {
+  if (!videoId) return [];
   try {
     const res = await fetchWithFallback(`/api/next/${videoId}`);
     if (!res.ok) return [];
     const data = await res.json();
-    return (data.tracks || []).map(normalizeTrack);
+    return (data.tracks || [])
+      .filter((t: any) => t && (t.id || t.videoId))
+      .map(normalizeTrack);
   } catch {
     return [];
   }
 }
 
 /**
- * Fetch curated or browse playlist
+ * Fetch playlist detail
  */
 export async function getBrowsePlaylist(browseId: string): Promise<Playlist | null> {
+  if (!browseId) return null;
   try {
     const res = await fetchWithFallback(`/api/playlist/${browseId}`);
     if (!res.ok) return null;
     const data = await res.json();
-    const tracks: Track[] = (data.tracks || []).map(normalizeTrack);
+    const tracks: Track[] = (data.tracks || [])
+      .filter((t: any) => t && (t.id || t.videoId))
+      .map(normalizeTrack);
+
     return {
       id: data.id || browseId,
       name: data.title || 'Playlist',
       description: data.description || '',
-      coverUrl: data.thumbnails?.[0]?.url || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&q=80',
+      coverUrl: data.thumbnails?.[0]?.url || (tracks[0]?.thumbnailUrl || ''),
       trackCount: tracks.length,
       tracks,
       creator: data.author || 'SoundWave'
@@ -258,11 +322,25 @@ export async function getBrowsePlaylist(browseId: string): Promise<Playlist | nu
 /**
  * Fetch artist detail
  */
-export async function getArtistDetail(browseId: string) {
+export async function getArtistDetail(browseId: string): Promise<ArtistDetail | null> {
+  if (!browseId) return null;
   try {
     const res = await fetchWithFallback(`/api/artist/${browseId}`);
     if (!res.ok) return null;
-    return await res.json();
+    const data = await res.json();
+    const topTracks: Track[] = (data.top_tracks || data.tracks || [])
+      .filter((t: any) => t && (t.id || t.videoId))
+      .map(normalizeTrack);
+
+    return {
+      id: data.id || browseId,
+      name: data.name || data.title || 'Artist',
+      subscribers: data.subscribers || data.subscriberCount || undefined,
+      description: data.description || undefined,
+      thumbnails: data.thumbnails || [],
+      topTracks,
+      albums: data.albums || [],
+    };
   } catch {
     return null;
   }
@@ -271,11 +349,25 @@ export async function getArtistDetail(browseId: string) {
 /**
  * Fetch album detail
  */
-export async function getAlbumDetail(browseId: string) {
+export async function getAlbumDetail(browseId: string): Promise<AlbumDetail | null> {
+  if (!browseId) return null;
   try {
     const res = await fetchWithFallback(`/api/album/${browseId}`);
     if (!res.ok) return null;
-    return await res.json();
+    const data = await res.json();
+    const tracks: Track[] = (data.tracks || [])
+      .filter((t: any) => t && (t.id || t.videoId))
+      .map(normalizeTrack);
+
+    return {
+      id: data.id || browseId,
+      title: data.title || 'Album',
+      artist: data.artist || (data.artists?.[0]?.name || 'Unknown Artist'),
+      year: data.year || undefined,
+      coverUrl: data.thumbnails?.[0]?.url || (tracks[0]?.thumbnailUrl || ''),
+      trackCount: tracks.length,
+      tracks,
+    };
   } catch {
     return null;
   }

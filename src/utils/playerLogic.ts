@@ -1,13 +1,3 @@
-export interface BaseTrack {
-  id: string;
-  title: string;
-  artist: string;
-  duration?: number;
-}
-
-/**
- * Calculates next queue index based on shuffle, repeat mode, and current index
- */
 export function getNextTrackIndex(
   currentIndex: number,
   queueLength: number,
@@ -40,9 +30,6 @@ export function getNextTrackIndex(
   return null;
 }
 
-/**
- * Calculates previous track index
- */
 export function getPreviousTrackIndex(
   currentIndex: number,
   queueLength: number,
@@ -50,7 +37,6 @@ export function getPreviousTrackIndex(
   shuffledIndices?: number[]
 ): number {
   if (queueLength === 0) return 0;
-  // If track has been playing for more than 3 seconds, restart current track
   if (currentTime > 3) {
     return currentIndex;
   }
@@ -67,14 +53,9 @@ export function getPreviousTrackIndex(
   return 0;
 }
 
-/**
- * Generates a randomized index array for shuffle playback
- */
 export function createShuffleIndices(length: number, currentFirstIndex: number = 0): number[] {
   const indices = Array.from({ length }, (_, i) => i);
-  // Remove current track
   const remaining = indices.filter(i => i !== currentFirstIndex);
-  // Fisher-Yates shuffle on remaining
   for (let i = remaining.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
