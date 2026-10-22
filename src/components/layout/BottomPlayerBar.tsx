@@ -221,10 +221,15 @@ export const BottomPlayerBar: React.FC<BottomPlayerBarProps> = ({ onNavigate, cl
             {/* Controls */}
             <div className="mt-6 flex items-center justify-between">
               <button
+                type="button"
                 onClick={toggleShuffle}
-                className={`p-2 ${isShuffle ? 'text-emerald-400' : 'text-zinc-400'}`}
+                title={isShuffle ? 'Shuffle on' : 'Shuffle off'}
+                aria-label={isShuffle ? 'Disable shuffle' : 'Enable shuffle'}
+                aria-pressed={isShuffle}
+                className={`relative p-2 transition-colors ${isShuffle ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'}`}
               >
                 <Shuffle className="w-5 h-5" />
+                {isShuffle && <span className="absolute bottom-0.5 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-emerald-400" />}
               </button>
 
               <button onClick={prevTrack} className="p-3 text-white">
@@ -243,10 +248,15 @@ export const BottomPlayerBar: React.FC<BottomPlayerBarProps> = ({ onNavigate, cl
               </button>
 
               <button
+                type="button"
                 onClick={cycleRepeat}
-                className={`p-2 ${repeatMode !== 'off' ? 'text-emerald-400' : 'text-zinc-400'}`}
+                title={repeatMode === 'off' ? 'Repeat off' : repeatMode === 'all' ? 'Repeat playlist' : 'Repeat current track'}
+                aria-label={`Repeat mode: ${repeatMode}. Activate to change mode.`}
+                aria-pressed={repeatMode !== 'off'}
+                className={`relative p-2 transition-colors ${repeatMode !== 'off' ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'}`}
               >
                 {repeatMode === 'one' ? <Repeat1 className="w-5 h-5" /> : <Repeat className="w-5 h-5" />}
+                {repeatMode !== 'off' && <span className="absolute bottom-0.5 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-emerald-400" />}
               </button>
             </div>
 
