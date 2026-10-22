@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   ArrowLeft, 
   User, 
@@ -8,11 +8,14 @@ import {
   Trash2, 
   ShieldCheck, 
   Sparkles,
-  Info
+  Info,
+  BarChart3
 } from 'lucide-react';
 import { ViewType } from '../types/music.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 import { usePlayer } from '../context/PlayerContext.tsx';
+import { getUserIsAdmin } from '../services/firebase.ts';
+import { EqualizerControl } from '../components/common/EqualizerControl.tsx';
 
 interface SettingsViewProps {
   onNavigate: (view: ViewType, payload?: any) => void;
@@ -22,6 +25,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onNavigate }) => {
   const { user, openAuthModal, logout } = useAuth();
   const { playbackQuality, setPlaybackQuality, autoplay, toggleAutoplay } = usePlayer();
   const [cacheCleared, setCacheCleared] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!user) {
+      setIsAdmin(false);
+      return;
+    }
+    void getUserIsAdmin(user.uid).then(value => {
+      if (!cancelled) setIsAdmin(value);
+    }).catch(() => {
+      if (!cancelled) setIsAdmin(false);
+    });
+    return () => { cancelled = true; };
+  }, [user]);
 
   const qualities: Array<'Low' | 'Normal' | 'High' | 'Lossless'> = ['Low', 'Normal', 'High', 'Lossless'];
 
@@ -49,6 +67,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onNavigate }) => {
       <div className="mb-8">
         <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">Settings</h1>
         <p className="text-sm text-zinc-400 mt-1">Manage your account preferences, audio quality, and app playback.</p>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => onNavigate('stats')}
+            className="mt-4 inline-flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] px-4 py-2.5 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-400/10"
+          >
+            <BarChart3 className="h-4 w-4" />
+            Open Admin Analytics
+          </button>
+        )}
       </div>
 
       <div className="space-y-6">
@@ -165,6 +193,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onNavigate }) => {
             </div>
           </div>
         </div>
+
+        <EqualizerControl />
 
         {/* Data & Storage Section */}
         <div className="bg-[#121620] rounded-xl border border-[#1e2432] p-5 md:p-6">

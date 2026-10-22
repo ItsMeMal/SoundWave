@@ -21,6 +21,7 @@ import { AlbumView } from './views/AlbumView.tsx';
 import { PlaylistView } from './views/PlaylistView.tsx';
 import { LyricsView } from './views/LyricsView.tsx';
 import { SettingsView } from './views/SettingsView.tsx';
+import { ListeningStatsView } from './views/ListeningStatsView.tsx';
 
 // Modals
 import { AuthModal } from './components/modals/AuthModal.tsx';
@@ -263,6 +264,10 @@ const AppContent: React.FC = () => {
 
             {currentView === 'settings' && (
               <SettingsView onNavigate={handleNavigate} />
+            )}
+
+            {currentView === 'stats' && (
+              <ListeningStatsView onNavigate={handleNavigate} />
             )}
           </div>
         </main>

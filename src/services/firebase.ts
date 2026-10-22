@@ -12,7 +12,8 @@ import {
 } from 'firebase/auth';
 import { 
   getFirestore, 
-  doc, 
+  doc,
+  collectionGroup, 
   getDoc, 
   setDoc, 
   deleteDoc,
@@ -446,6 +447,17 @@ export async function addPlaybackHistory(userId: string, track: Track): Promise<
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
+}
+
+export async function getUserIsAdmin(userId: string): Promise<boolean> {
+  const snap = await getDoc(doc(db, 'users', userId));
+  return snap.exists() && snap.data().admin === true;
+}
+
+export function subscribeAdminListeningSessions(onUpdate: (items: ListeningSession[]) => void): Unsubscribe {
+  const q = query(collectionGroup(db, 'listeningSessions'), orderBy('updatedAt', 'desc'), limit(2000));
+  return onSnapshot(q, snapshot => onUpdate(snapshot.docs.map(d => d.data() as ListeningSession)),
+    err => handleFirestoreError(err, OperationType.LIST, 'users/*/listeningSessions'));
 }
 
 // Continue Listening: private per-user playback positions for cross-device resume.

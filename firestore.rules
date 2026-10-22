@@ -13,11 +13,22 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('admin', false) == true;
+    }
+
     match /users/{userId} {
       allow get: if isOwner(userId);
-      allow create, update: if isOwner(userId)
+      allow create: if isOwner(userId)
         && request.resource.data.uid == userId
-        && request.resource.data.email is string;
+        && request.resource.data.email is string
+        && !('admin' in request.resource.data);
+      allow update: if isOwner(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.email is string
+        && request.resource.data.get('admin', false) == resource.data.get('admin', false);
       allow delete: if false;
 
       match /playlists/{playlistId} {
@@ -57,7 +68,7 @@ service cloud.firestore {
       }
 
       match /listeningSessions/{sessionId} {
-        allow get, list: if isOwner(userId);
+        allow get, list: if isOwner(userId) || isAdmin();
         allow create, update: if isOwner(userId)
           && request.resource.data.userId == userId
           && request.resource.data.videoId is string
