@@ -206,6 +206,29 @@ export async function createFirestorePlaylist(
   }
 }
 
+// Firestore rejects undefined values anywhere in a document (including nested artist metadata).
+// API-normalized tracks can legitimately contain optional fields set to undefined.
+function stripUndefinedFields<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value
+      .filter(item => item !== undefined)
+      .map(item => stripUndefinedFields(item)) as T;
+  }
+
+  if (value && typeof value === 'object') {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return value;
+
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, field]) => field !== undefined)
+        .map(([key, field]) => [key, stripUndefinedFields(field)])
+    ) as T;
+  }
+
+  return value;
+}
+
 // Public sharing stores a minimal snapshot under a high-entropy unlisted token.
 // Provider stream URLs and bulky search metadata are intentionally not copied to public documents.
 function toShareableTracks(tracks: Track[]): Track[] {
@@ -333,7 +356,9 @@ export async function addTrackToUserPlaylist(
       return { alreadyPresent: true, sharedLinkUpdated: true };
     }
 
-    const updatedTracks = [...existingTracks, track];
+    // Sanitize both the incoming API track and every existing entry before writing.
+    // This covers nested values such as artists[].id plus optional album/streamUrl fields.
+    const updatedTracks = stripUndefinedFields([...existingTracks, track]);
     const now = new Date().toISOString();
 
     // Commit the owner's playlist first. A stale/disabled public link must not prevent
