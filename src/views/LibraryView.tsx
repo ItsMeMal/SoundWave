@@ -202,7 +202,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           )}
         </div>
       )}
-    </div>
       <ConfirmDialog
         isOpen={playlistToDelete !== null}
         title={`Delete “${playlistToDelete?.name || 'playlist'}”?`}
@@ -214,5 +213,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           if (!isDeleting) setPlaylistToDelete(null);
         }}
       />
+    </div>
   );
 };
