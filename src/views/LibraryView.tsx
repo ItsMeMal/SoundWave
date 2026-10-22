@@ -87,7 +87,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
               {userPlaylists.map((pl) => (
                 <div
                   key={pl.id}
-                  onClick={() => onNavigate('playlist', { id: pl.id, playlist: pl, name: pl.name })}
+                  onClick={() => onNavigate('playlist', { playlistId: pl.id, initialPlaylist: pl, name: pl.name })}
                   className="bg-[#12161f]/60 hover:bg-[#161b26] p-3 rounded-xl border border-transparent hover:border-zinc-800 transition-all cursor-pointer group flex flex-col"
                 >
                   <div className="relative aspect-square w-full mb-3 rounded-lg overflow-hidden shadow-md">
