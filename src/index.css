@@ -27,3 +27,27 @@
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #323b4e;
 }
+
+
+@keyframes lyrics-line-enter {
+  from {
+    opacity: 0.42;
+    transform: translate3d(0, 12px, 0) scale(0.985);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    filter: blur(0);
+  }
+}
+
+.lyrics-line-active {
+  animation: lyrics-line-enter 380ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lyrics-line-active {
+    animation: none;
+  }
+}
