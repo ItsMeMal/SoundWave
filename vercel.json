@@ -3,23 +3,35 @@
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
-        { "key": "Strict-Transport-Security", "value": "max-age=31536000" }
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=31536000"
+        }
       ]
     }
   ],
+  "functions": {
+    "api/music/[...path].ts": {
+      "maxDuration": 10
+    }
+  },
   "rewrites": [
-    {
-      "source": "/api/music/api/:path*",
-      "destination": "https://music-api.amanenime.my.id/api/:path*"
-    },
-    {
-      "source": "/api/music/:path*",
-      "destination": "https://music-api.amanenime.my.id/api/:path*"
-    },
     {
       "source": "/(.*)",
       "destination": "/index.html"

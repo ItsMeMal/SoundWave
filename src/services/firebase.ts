@@ -1,4 +1,5 @@
 import { initializeApp } from 'firebase/app';
+import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
 import { 
   getAuth, 
   GoogleAuthProvider, 
@@ -65,6 +66,22 @@ if (missingFirebaseValues.length > 0) {
 }
 
 const app = initializeApp(firebaseConfig);
+
+// Optional Firebase App Check integration. Enable it by setting a reCAPTCHA v3
+// site key and registering the same provider/domain in Firebase Console.
+// Enforcement must then be enabled in Firebase Console for the desired Firebase products.
+const appCheckSiteKey = import.meta.env.VITE_FIREBASE_APPCHECK_RECAPTCHA_SITE_KEY?.trim();
+if (appCheckSiteKey && typeof window !== 'undefined') {
+  try {
+    initializeAppCheck(app, {
+      provider: new ReCaptchaV3Provider(appCheckSiteKey),
+      isTokenAutoRefreshEnabled: true,
+    });
+  } catch {
+    console.warn('[SoundWave] Firebase App Check could not be initialized; check its provider and domain configuration.');
+  }
+}
+
 export const db = getFirestore(app, firestoreDatabaseId!);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
@@ -229,26 +246,88 @@ function stripUndefinedFields<T>(value: T): T {
   return value;
 }
 
-// Public sharing stores a minimal snapshot under a high-entropy unlisted token.
+function boundedText(value: unknown, maxLength: number, fallback = ''): string {
+  if (typeof value !== 'string') return fallback;
+  return value.trim().slice(0, maxLength) || fallback;
+}
+
+function safeHttpsUrl(value: unknown): string {
+  if (typeof value !== 'string' || value.length > 2048) return '';
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' ? url.toString() : '';
+  } catch {
+    return '';
+  }
+}
+
+// User playlists only need track metadata. Temporary provider stream URLs are
+// intentionally discarded so they are not persisted in Firestore or shared links.
+function sanitizeTrackForStorage(track: Track): Track {
+  const id = boundedText(track?.id, 128);
+  const title = boundedText(track?.title, 500, 'Unknown track');
+  const artist = boundedText(track?.artist, 500, 'Unknown artist');
+  const thumbnailUrl = safeHttpsUrl(track?.thumbnailUrl)
+    || (id ? `https://i.ytimg.com/vi/${encodeURIComponent(id)}/hqdefault.jpg` : '');
+
+  const artists = Array.isArray(track?.artists)
+    ? track.artists.slice(0, 10)
+        .filter(artist => artist && typeof artist === 'object')
+        .map(artist => ({
+          name: boundedText(artist.name, 200, 'Unknown artist'),
+          ...(typeof artist.id === 'string' && artist.id.length <= 128 ? { id: artist.id } : {}),
+        }))
+    : undefined;
+
+  const thumbnails = Array.isArray(track?.thumbnails)
+    ? track.thumbnails.slice(0, 8)
+        .map(thumbnail => ({
+          url: safeHttpsUrl(thumbnail?.url),
+          ...(Number.isFinite(thumbnail?.width) ? { width: Math.max(0, Math.min(4000, Number(thumbnail.width))) } : {}),
+          ...(Number.isFinite(thumbnail?.height) ? { height: Math.max(0, Math.min(4000, Number(thumbnail.height))) } : {}),
+        }))
+        .filter(thumbnail => thumbnail.url)
+    : undefined;
+
+  return stripUndefinedFields({
+    id,
+    title,
+    artist,
+    ...(artists?.length ? { artists } : {}),
+    album: boundedText(track?.album, 500),
+    thumbnailUrl,
+    ...(thumbnails?.length ? { thumbnails } : {}),
+    duration: Number.isFinite(track?.duration) ? Math.max(0, Math.min(86400, track.duration)) : 0,
+    ...(track?.source ? { source: track.source } : {}),
+  }) as Track;
+}
+
+// Public sharing stores compact metadata under a high-entropy unlisted token.
 // Provider stream URLs and bulky search metadata are intentionally not copied to public documents.
 function toShareableTracks(tracks: Track[]): Track[] {
-  return tracks.slice(0, 500).filter(Boolean).map(track => ({
-    id: String(track.id || ''),
-    title: String(track.title || 'Unknown track'),
-    artist: String(track.artist || 'Unknown artist'),
-    album: String(track.album || ''),
-    thumbnailUrl: String(track.thumbnailUrl || ''),
-    duration: Number.isFinite(track.duration) ? Math.max(0, track.duration) : 0,
-  }));
+  return tracks
+    .slice(0, 500)
+    .filter(track => track && typeof track.id === 'string' && track.id.trim().length > 0)
+    .map(track => {
+      const safe = sanitizeTrackForStorage(track);
+      return {
+        id: safe.id,
+        title: boundedText(safe.title, 500, 'Unknown track'),
+        artist: boundedText(safe.artist, 500, 'Unknown artist'),
+        album: boundedText(safe.album, 500),
+        thumbnailUrl: safeHttpsUrl(safe.thumbnailUrl),
+        duration: Number.isFinite(safe.duration) ? Math.max(0, Math.min(86400, safe.duration)) : 0,
+      };
+    });
 }
 
 function createShareToken(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-    const bytes = new Uint8Array(24);
-    crypto.getRandomValues(bytes);
-    return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  if (typeof crypto === 'undefined' || typeof crypto.getRandomValues !== 'function') {
+    throw new Error('Secure random token generation is unavailable in this browser.');
   }
-  return Array.from({ length: 48 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 export async function createOrUpdateSharedPlaylist(
@@ -275,10 +354,10 @@ export async function createOrUpdateSharedPlaylist(
     playlistId: playlist.id,
     shareId,
     ownerId: userId,
-    name: String(playlist.name || 'Shared playlist'),
-    description: String(playlist.description || ''),
-    coverUrl: String(playlist.coverUrl || publicTracks[0]?.thumbnailUrl || ''),
-    creator: String(creatorName || 'SoundWave listener'),
+    name: boundedText(playlist.name, 100, 'Shared playlist'),
+    description: boundedText(playlist.description, 1000),
+    coverUrl: safeHttpsUrl(playlist.coverUrl) || publicTracks[0]?.thumbnailUrl || '',
+    creator: boundedText(creatorName, 100, 'SoundWave listener'),
     trackCount: publicTracks.length,
     tracks: publicTracks,
     isPublic: true,
@@ -291,7 +370,7 @@ export async function createOrUpdateSharedPlaylist(
 }
 
 export async function getSharedPlaylist(shareId: string): Promise<Playlist | null> {
-  if (!/^[a-fA-F0-9]{32,80}$/.test(shareId)) return null;
+  if (!/^[a-fA-F0-9]{48}$/.test(shareId)) return null;
   const snap = await getDoc(doc(db, 'sharedPlaylists', shareId));
   if (!snap.exists()) return null;
   const data = snap.data();
@@ -352,13 +431,19 @@ export async function addTrackToUserPlaylist(
     }
 
     const existingTracks = Array.isArray(data.tracks) ? data.tracks : [];
-    if (existingTracks.some(existing => existing.id === track.id)) {
+    if (existingTracks.some(existing => existing?.id === track.id)) {
       return { alreadyPresent: true, sharedLinkUpdated: true };
     }
+    if (existingTracks.length >= 500) {
+      throw new Error('A playlist can contain up to 500 tracks.');
+    }
 
-    // Sanitize both the incoming API track and every existing entry before writing.
-    // This covers nested values such as artists[].id plus optional album/streamUrl fields.
-    const updatedTracks = stripUndefinedFields([...existingTracks, track]);
+    const safeTrack = sanitizeTrackForStorage(track);
+    if (!safeTrack.id) throw new Error('This track has an invalid identifier.');
+    const safeExistingTracks = existingTracks
+      .filter(existing => existing && typeof existing.id === 'string' && existing.id.length > 0)
+      .map(existing => sanitizeTrackForStorage(existing));
+    const updatedTracks = stripUndefinedFields([...safeExistingTracks, safeTrack]);
     const now = new Date().toISOString();
 
     // Commit the owner's playlist first. A stale/disabled public link must not prevent
@@ -416,7 +501,10 @@ export async function removeTrackFromUserPlaylist(userId: string, playlistId: st
     const data = snap.data() as Playlist;
     if (data.userId !== userId) throw new Error('Only the playlist owner can edit this playlist.');
 
-    const updatedTracks = (data.tracks || []).filter(track => track.id !== trackId);
+    const updatedTracks = (Array.isArray(data.tracks) ? data.tracks : [])
+      .filter(track => track?.id !== trackId)
+      .filter(track => track && typeof track.id === 'string' && track.id.length > 0)
+      .map(track => sanitizeTrackForStorage(track));
     const now = new Date().toISOString();
     const playlistUpdate: Record<string, any> = {
       tracks: updatedTracks,

@@ -2,23 +2,41 @@ import { Track, SearchResult, LyricsResponse, Playlist, ArtistDetail, AlbumDetai
 
 const API_PREFIX = '/api/music';
 
-// Client-side in-memory cache for speed and resilience (5 minute TTL)
-const clientCache = new Map<string, { data: any; time: number }>();
+// Bound the cache so searching many unique terms cannot grow memory indefinitely.
+const MAX_CLIENT_CACHE_ENTRIES = 200;
+const clientCache = new Map<string, { data: unknown; time: number }>();
 
-async function fetchWithFallback(endpoint: string, options: RequestInit = {}): Promise<Response> {
-  const cleanPath = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-  const fullApiPath = cleanPath.startsWith('/api') ? cleanPath : `/api${cleanPath}`;
-  const proxyUrl = `${API_PREFIX}${fullApiPath}`;
+function clientCacheTtlMs(url: string): number {
+  if (url.includes('/api/stream/')) return 15_000; // Stream URLs may expire.
+  if (url.includes('/api/search?') || url.includes('/api/suggestions?')) return 30_000;
+  if (url.includes('/api/lyrics/')) return 5 * 60_000;
+  return 60_000;
+}
 
-  // Check client memory cache for GET requests
-  if (!options.method || options.method === 'GET') {
+function cacheClientResponse(key: string, data: unknown): void {
+  if (!clientCache.has(key) && clientCache.size >= MAX_CLIENT_CACHE_ENTRIES) {
+    const oldest = clientCache.keys().next().value;
+    if (oldest !== undefined) clientCache.delete(oldest);
+  }
+  clientCache.set(key, { data, time: Date.now() });
+}
+
+async function fetchProxy(endpoint: string, options: RequestInit = {}): Promise<Response> {
+  const cleanPath = endpoint.startsWith('/') ? endpoint : \`/\${endpoint}\`;
+  const fullApiPath = cleanPath.startsWith('/api') ? cleanPath : \`/api\${cleanPath}\`;
+  const proxyUrl = \`\${API_PREFIX}\${fullApiPath}\`;
+  const isGet = !options.method || options.method.toUpperCase() === 'GET';
+  const cacheTtl = clientCacheTtlMs(proxyUrl);
+
+  if (isGet) {
     const cached = clientCache.get(proxyUrl);
-    if (cached && Date.now() - cached.time < 5 * 60 * 1000) {
+    if (cached && Date.now() - cached.time < cacheTtl) {
       return new Response(JSON.stringify(cached.data), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
     }
+    if (cached) clientCache.delete(proxyUrl);
   }
 
   const controller = new AbortController();
@@ -29,30 +47,14 @@ async function fetchWithFallback(endpoint: string, options: RequestInit = {}): P
       ...options,
       signal: controller.signal,
     });
-    clearTimeout(timer);
 
-    if (res.ok && (!options.method || options.method === 'GET')) {
+    if (res.ok && isGet) {
       const cloned = res.clone();
-      cloned.json().then(data => {
-        clientCache.set(proxyUrl, { data, time: Date.now() });
-      }).catch(() => {});
+      cloned.json().then(data => cacheClientResponse(proxyUrl, data)).catch(() => {});
     }
     return res;
-  } catch (err: any) {
+  } finally {
     clearTimeout(timer);
-    // If proxy failed, attempt direct fetch with short timeout as secondary fallback
-    try {
-      const directController = new AbortController();
-      const directTimer = setTimeout(() => directController.abort(), 8000);
-      const directRes = await fetch(`https://music-api.amanenime.my.id${fullApiPath}`, {
-        ...options,
-        signal: directController.signal,
-      });
-      clearTimeout(directTimer);
-      return directRes;
-    } catch {
-      throw err;
-    }
   }
 }
 
@@ -118,7 +120,7 @@ export function normalizeTrack(raw: any): Track {
  */
 export async function checkApiHealth(): Promise<boolean> {
   try {
-    const res = await fetchWithFallback('/health');
+    const res = await fetchProxy('/health');
     return res.ok;
   } catch {
     return false;
@@ -134,7 +136,7 @@ export async function searchMusic(query: string, limit: number = 20): Promise<Se
   }
 
   try {
-    const res = await fetchWithFallback(`/api/search?q=${encodeURIComponent(query.trim())}&limit=${limit}`);
+    const res = await fetchProxy(`/api/search?q=${encodeURIComponent(query.trim())}&limit=${limit}`);
     if (!res.ok) {
       throw new Error(`Search failed with status ${res.status}`);
     }
@@ -160,7 +162,7 @@ export async function getSuggestions(query: string): Promise<string[]> {
   if (!query || query.trim().length < 2) return [];
 
   try {
-    const res = await fetchWithFallback(`/api/suggestions?q=${encodeURIComponent(query.trim())}`);
+    const res = await fetchProxy(`/api/suggestions?q=${encodeURIComponent(query.trim())}`);
     if (!res.ok) return [];
     const data = await res.json();
     const list: string[] = [];
@@ -188,7 +190,7 @@ export async function getSuggestions(query: string): Promise<string[]> {
 export async function getTrack(videoId: string): Promise<Track | null> {
   if (!videoId) return null;
   try {
-    const res = await fetchWithFallback(`/api/track/${videoId}`);
+    const res = await fetchProxy(`/api/track/${videoId}`);
     if (!res.ok) return null;
     const data = await res.json();
     return normalizeTrack(data);
@@ -205,7 +207,7 @@ export async function getStreamUrl(videoId: string): Promise<string | null> {
 
   // 1. Standard format
   try {
-    const res = await fetchWithFallback(`/api/stream/${videoId}`);
+    const res = await fetchProxy(`/api/stream/${videoId}`);
     if (res.ok) {
       const data = await res.json();
       if (data.stream_url) return data.stream_url;
@@ -216,7 +218,7 @@ export async function getStreamUrl(videoId: string): Promise<string | null> {
 
   // 2. Format 140 (M4A audio)
   try {
-    const res140 = await fetchWithFallback(`/api/stream/${videoId}?f=140`);
+    const res140 = await fetchProxy(`/api/stream/${videoId}?f=140`);
     if (res140.ok) {
       const data140 = await res140.json();
       if (data140.stream_url) return data140.stream_url;
@@ -227,7 +229,7 @@ export async function getStreamUrl(videoId: string): Promise<string | null> {
 
   // 3. Format 251 (Opus audio)
   try {
-    const res251 = await fetchWithFallback(`/api/stream/${videoId}?f=251`);
+    const res251 = await fetchProxy(`/api/stream/${videoId}?f=251`);
     if (res251.ok) {
       const data251 = await res251.json();
       if (data251.stream_url) return data251.stream_url;
@@ -251,7 +253,7 @@ export async function getLyrics(videoId: string, track?: Track): Promise<LyricsR
   let fallback: LyricsResponse | null = null;
 
   try {
-    const res = await fetchWithFallback(`/api/lyrics/${videoId}`);
+    const res = await fetchProxy(`/api/lyrics/${videoId}`);
     if (res.ok) {
       const data = await res.json();
       const text = typeof data.lyrics === 'string' ? data.lyrics : '';
@@ -383,7 +385,7 @@ export async function getLyrics(videoId: string, track?: Track): Promise<LyricsR
 export async function getRelatedTracks(videoId: string): Promise<Track[]> {
   if (!videoId) return [];
   try {
-    const res = await fetchWithFallback(`/api/related/${videoId}`);
+    const res = await fetchProxy(`/api/related/${videoId}`);
     if (!res.ok) return [];
     const data = await res.json();
     return (data.tracks || [])
@@ -400,7 +402,7 @@ export async function getRelatedTracks(videoId: string): Promise<Track[]> {
 export async function getNextTracks(videoId: string): Promise<Track[]> {
   if (!videoId) return [];
   try {
-    const res = await fetchWithFallback(`/api/next/${videoId}`);
+    const res = await fetchProxy(`/api/next/${videoId}`);
     if (!res.ok) return [];
     const data = await res.json();
     return (data.tracks || [])
@@ -417,7 +419,7 @@ export async function getNextTracks(videoId: string): Promise<Track[]> {
 export async function getBrowsePlaylist(browseId: string): Promise<Playlist | null> {
   if (!browseId) return null;
   try {
-    const res = await fetchWithFallback(`/api/playlist/${browseId}`);
+    const res = await fetchProxy(`/api/playlist/${browseId}`);
     if (!res.ok) return null;
     const data = await res.json();
     const tracks: Track[] = (data.tracks || [])
@@ -444,7 +446,7 @@ export async function getBrowsePlaylist(browseId: string): Promise<Playlist | nu
 export async function getArtistDetail(browseId: string): Promise<ArtistDetail | null> {
   if (!browseId) return null;
   try {
-    const res = await fetchWithFallback(`/api/artist/${browseId}`);
+    const res = await fetchProxy(`/api/artist/${browseId}`);
     if (!res.ok) return null;
     const data = await res.json();
     const topTracks: Track[] = (data.top_tracks || data.tracks || [])
@@ -471,7 +473,7 @@ export async function getArtistDetail(browseId: string): Promise<ArtistDetail | 
 export async function getAlbumDetail(browseId: string): Promise<AlbumDetail | null> {
   if (!browseId) return null;
   try {
-    const res = await fetchWithFallback(`/api/album/${browseId}`);
+    const res = await fetchProxy(`/api/album/${browseId}`);
     if (!res.ok) return null;
     const data = await res.json();
     const tracks: Track[] = (data.tracks || [])

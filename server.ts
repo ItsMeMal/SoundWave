@@ -46,6 +46,36 @@ const MAX_JSON_RESPONSE_BYTES = 10 * 1024 * 1024;
 const MAX_PROXY_URL_LENGTH = 2048;
 
 const cache = new Map<string, { data: unknown; contentType: string; expires: number }>();
+const rateWindows = new Map<string, { startedAt: number; count: number }>();
+const RATE_WINDOW_MS = 60_000;
+
+function consumeRateLimit(key: string, maximum: number): number {
+  const now = Date.now();
+  const current = rateWindows.get(key);
+  if (!current || now - current.startedAt >= RATE_WINDOW_MS || now < current.startedAt) {
+    rateWindows.set(key, { startedAt: now, count: 1 });
+    return 0;
+  }
+  if (current.count >= maximum) {
+    return Math.max(1, Math.ceil((RATE_WINDOW_MS - (now - current.startedAt)) / 1000));
+  }
+  current.count += 1;
+  return 0;
+}
+
+function pruneRateWindows(): void {
+  if (rateWindows.size < 5000) return;
+  const now = Date.now();
+  for (const [key, value] of rateWindows) {
+    if (now - value.startedAt > RATE_WINDOW_MS * 2) rateWindows.delete(key);
+  }
+}
+
+// Configure TRUST_PROXY_HOPS only when this service is reachable solely through
+// a trusted reverse proxy; otherwise an attacker could forge forwarded client IPs.
+if (process.env.TRUST_PROXY_HOPS && /^\d+$/.test(process.env.TRUST_PROXY_HOPS)) {
+  app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS));
+}
 
 // Avoid revealing Express/version information and add baseline browser protections.
 app.disable('x-powered-by');
@@ -55,10 +85,16 @@ app.use((_req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
 
-  // This is a public, read-only music API proxy; CORS is not an auth boundary.
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  // Same-origin browser usage is supported; do not expose the proxy to arbitrary
+  // cross-origin browser scripts. CORS is not an authentication boundary.
+  const origin = _req.get('origin');
+  const requestOrigin = `${_req.protocol}://${_req.get('host')}`;
+  if (origin && origin === requestOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (_req.method === 'OPTIONS') {
     res.status(204).end();
@@ -122,25 +158,96 @@ app.get('/api/health', (_req, res) => {
 // Only GET/HEAD requests are forwarded. The destination host is fixed, the
 // URL length is bounded, upstream JSON is size-limited, and binary responses stream.
 app.get('/api/music/*', async (req, res) => {
-  const rawPath = req.originalUrl.slice('/api/music'.length);
-  if (rawPath.length > MAX_PROXY_URL_LENGTH) {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  pruneRateWindows();
+  const globalWait = consumeRateLimit('all:' + ip, 180);
+  if (globalWait) {
+    res.setHeader('Retry-After', String(globalWait));
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(429).json({ error: 'Request limit reached. Please retry shortly.' });
+    return;
+  }
+
+  const requestUrl = new URL(req.originalUrl, 'http://localhost');
+  if (requestUrl.pathname.length + requestUrl.search.length > MAX_PROXY_URL_LENGTH) {
     res.status(414).json({ error: 'Music API request URL is too long.' });
     return;
   }
 
-  const upstreamPath = rawPath.startsWith('/api/') || rawPath === '/api'
-    ? rawPath
-    : '/api' + rawPath;
-  const targetUrl = new URL(upstreamPath, MUSIC_API_BASE);
-
-  if (
-    targetUrl.origin !== MUSIC_API_ORIGIN ||
-    (!targetUrl.pathname.startsWith('/api/') && targetUrl.pathname !== '/api')
-  ) {
-    res.status(400).json({ error: 'Invalid Music API path.' });
+  let apiPath = requestUrl.pathname.slice('/api/music'.length);
+  if (!apiPath.startsWith('/api/')) apiPath = '/api' + apiPath;
+  const match = /^\/api\/(health|search|suggestions|track|stream|lyrics|related|next|playlist|artist|album)(?:\/([A-Za-z0-9_-]{1,160}))?$/.exec(apiPath);
+  if (!match) {
+    res.status(404).json({ error: 'Unknown music API endpoint.' });
     return;
   }
 
+  const route = match[1];
+  const id = match[2];
+  const idRoutes = new Set(['track', 'stream', 'lyrics', 'related', 'next', 'playlist', 'artist', 'album']);
+  if ((idRoutes.has(route) && !id) || (!idRoutes.has(route) && id)) {
+    res.status(400).json({ error: 'Invalid music API path.' });
+    return;
+  }
+
+  const permittedParams: Record<string, string[]> = {
+    health: [], search: ['q', 'limit'], suggestions: ['q'], track: [],
+    stream: ['f'], lyrics: [], related: [], next: [], playlist: [], artist: [], album: [],
+  };
+  for (const key of requestUrl.searchParams.keys()) {
+    if (!permittedParams[route].includes(key) || requestUrl.searchParams.getAll(key).length !== 1) {
+      res.status(400).json({ error: 'Unsupported or duplicate query parameter.' });
+      return;
+    }
+  }
+
+  const targetUrl = new URL('/api/' + route + (id ? '/' + id : ''), MUSIC_API_BASE);
+  if (route === 'search') {
+    const query = (requestUrl.searchParams.get('q') || '').trim();
+    if (!query || query.length > 100) {
+      res.status(400).json({ error: 'Search query must contain 1–100 characters.' });
+      return;
+    }
+    const rawLimit = requestUrl.searchParams.get('limit') || '20';
+    if (!/^\d+$/.test(rawLimit) || !Number.isSafeInteger(Number(rawLimit)) || Number(rawLimit) < 1) {
+      res.status(400).json({ error: 'Invalid search result limit.' });
+      return;
+    }
+    targetUrl.searchParams.set('q', query);
+    targetUrl.searchParams.set('limit', String(Math.min(20, Number(rawLimit))));
+    const searchWait = consumeRateLimit('search:' + ip, 75);
+    if (searchWait) {
+      res.setHeader('Retry-After', String(searchWait));
+      res.status(429).json({ error: 'Search limit reached. Please retry shortly.' });
+      return;
+    }
+  } else if (route === 'suggestions') {
+    const query = (requestUrl.searchParams.get('q') || '').trim();
+    if (query.length < 2 || query.length > 80) {
+      res.status(400).json({ error: 'Suggestion query must contain 2–80 characters.' });
+      return;
+    }
+    targetUrl.searchParams.set('q', query);
+    const searchWait = consumeRateLimit('search:' + ip, 75);
+    if (searchWait) {
+      res.setHeader('Retry-After', String(searchWait));
+      res.status(429).json({ error: 'Search limit reached. Please retry shortly.' });
+      return;
+    }
+  } else if (route === 'stream') {
+    const format = requestUrl.searchParams.get('f');
+    if (format !== null && format !== '140' && format !== '251') {
+      res.status(400).json({ error: 'Unsupported stream format.' });
+      return;
+    }
+    if (format) targetUrl.searchParams.set('f', format);
+    const streamWait = consumeRateLimit('stream:' + ip, 60);
+    if (streamWait) {
+      res.setHeader('Retry-After', String(streamWait));
+      res.status(429).json({ error: 'Stream lookup limit reached. Please retry shortly.' });
+      return;
+    }
+  }
   const cacheKey = targetUrl.toString();
   if (req.method === 'GET') {
     const cached = cache.get(cacheKey);
@@ -152,13 +259,13 @@ app.get('/api/music/*', async (req, res) => {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 25000);
+  const timeout = setTimeout(() => controller.abort(), 8000);
 
   try {
     const headers: Record<string, string> = {
       'User-Agent': 'SoundWave-App/1.0',
     };
-    if (req.headers.accept) headers.Accept = req.headers.accept;
+    headers.Accept = 'application/json';
 
     const response = await fetch(targetUrl, {
       method: req.method,

@@ -19,93 +19,232 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('admin', false) == true;
     }
 
+    function shortString(value, maxLength) {
+      return value is string && value.size() <= maxLength;
+    }
+
+    function validPlaylist(userId) {
+      return request.resource.data.keys().hasOnly([
+          'id', 'userId', 'name', 'description', 'coverUrl', 'trackCount',
+          'tracks', 'createdAt', 'updatedAt', 'shareId', 'creator'
+        ])
+        && request.resource.data.get('userId', '') == userId
+        && shortString(request.resource.data.get('id', ''), 128)
+        && shortString(request.resource.data.get('name', ''), 100)
+        && request.resource.data.get('name', '').size() > 0
+        && shortString(request.resource.data.get('description', ''), 1000)
+        && shortString(request.resource.data.get('coverUrl', ''), 2048)
+        && shortString(request.resource.data.get('creator', ''), 100)
+        && request.resource.data.get('tracks', []) is list
+        && request.resource.data.get('tracks', []).size() <= 500
+        && request.resource.data.get('trackCount', -1) is int
+        && request.resource.data.get('trackCount', -1) == request.resource.data.get('tracks', []).size()
+        && shortString(request.resource.data.get('createdAt', ''), 40)
+        && shortString(request.resource.data.get('updatedAt', ''), 40)
+        && (
+          request.resource.data.get('shareId', '') == ''
+          || (
+            request.resource.data.get('shareId', '') is string
+            && request.resource.data.get('shareId', '').matches('^[a-fA-F0-9]{48}$')
+          )
+        );
+    }
+
+    function validTrackFields(trackId) {
+      return request.resource.data.get('id', '') == trackId
+        && request.resource.data.get('videoId', '') == trackId
+        && shortString(request.resource.data.get('userId', ''), 128)
+        && request.resource.data.get('userId', '') == request.auth.uid
+        && shortString(request.resource.data.get('title', ''), 500)
+        && shortString(request.resource.data.get('artist', ''), 500)
+        && shortString(request.resource.data.get('album', ''), 500)
+        && shortString(request.resource.data.get('thumbnailUrl', ''), 2048)
+        && request.resource.data.get('duration', 0) is number
+        && request.resource.data.get('duration', 0) >= 0
+        && request.resource.data.get('duration', 0) <= 86400;
+    }
+
     match /users/{userId} {
       allow get: if isOwner(userId);
+
+      // User profile fields are allowlisted. Admin role is never client-writable.
       allow create: if isOwner(userId)
+        && request.resource.data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'photoURL', 'createdAt', 'updatedAt'
+        ])
         && request.resource.data.uid == userId
-        && request.resource.data.email is string
-        && !('admin' in request.resource.data);
+        && shortString(request.resource.data.get('email', ''), 254)
+        && shortString(request.resource.data.get('displayName', ''), 100)
+        && shortString(request.resource.data.get('photoURL', ''), 2048)
+        && shortString(request.resource.data.get('createdAt', ''), 40)
+        && shortString(request.resource.data.get('updatedAt', ''), 40);
+
       allow update: if isOwner(userId)
+        && request.resource.data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'photoURL', 'createdAt', 'updatedAt', 'admin'
+        ])
         && request.resource.data.uid == userId
-        && request.resource.data.email is string
+        && shortString(request.resource.data.get('email', ''), 254)
+        && shortString(request.resource.data.get('displayName', ''), 100)
+        && shortString(request.resource.data.get('photoURL', ''), 2048)
+        && shortString(request.resource.data.get('createdAt', ''), 40)
+        && shortString(request.resource.data.get('updatedAt', ''), 40)
         && request.resource.data.get('admin', false) == resource.data.get('admin', false);
+
       allow delete: if false;
 
       match /playlists/{playlistId} {
         allow get, list: if isOwner(userId);
-        allow create, update: if isOwner(userId)
-          && request.resource.data.userId == userId
-          && request.resource.data.name is string
-          && request.resource.data.name.size() > 0;
+        allow create, update: if isOwner(userId) && validPlaylist(userId);
         allow delete: if isOwner(userId);
       }
 
       match /likedTracks/{trackId} {
         allow get, list: if isOwner(userId);
         allow create, update: if isOwner(userId)
-          && request.resource.data.userId == userId
-          && request.resource.data.videoId is string;
+          && request.resource.data.keys().hasOnly([
+            'id', 'videoId', 'userId', 'title', 'artist', 'album',
+            'thumbnailUrl', 'duration', 'likedAt'
+          ])
+          && validTrackFields(trackId)
+          && shortString(request.resource.data.get('likedAt', ''), 40);
         allow delete: if isOwner(userId);
       }
 
-      match /history/{historyId} {
+      match /history/{trackId} {
         allow get, list: if isOwner(userId);
         allow create, update: if isOwner(userId)
-          && request.resource.data.userId == userId
-          && request.resource.data.videoId is string;
+          && request.resource.data.keys().hasOnly([
+            'id', 'videoId', 'userId', 'title', 'artist', 'thumbnailUrl',
+            'duration', 'playedAt'
+          ])
+          && request.resource.data.get('id', '') == trackId
+          && request.resource.data.get('videoId', '') == trackId
+          && request.resource.data.get('userId', '') == request.auth.uid
+          && shortString(request.resource.data.get('title', ''), 500)
+          && shortString(request.resource.data.get('artist', ''), 500)
+          && shortString(request.resource.data.get('thumbnailUrl', ''), 2048)
+          && request.resource.data.get('duration', 0) is number
+          && request.resource.data.get('duration', 0) >= 0
+          && request.resource.data.get('duration', 0) <= 86400
+          && shortString(request.resource.data.get('playedAt', ''), 40);
         allow delete: if isOwner(userId);
       }
 
       match /playbackProgress/{trackId} {
         allow get, list: if isOwner(userId);
         allow create, update: if isOwner(userId)
-          && request.resource.data.userId == userId
-          && request.resource.data.videoId is string
-          && request.resource.data.position is number
-          && request.resource.data.position >= 0
-          && request.resource.data.position <= 86400;
+          && request.resource.data.keys().hasOnly([
+            'id', 'videoId', 'userId', 'title', 'artist', 'thumbnailUrl',
+            'duration', 'position', 'updatedAt'
+          ])
+          && request.resource.data.get('id', '') == trackId
+          && request.resource.data.get('videoId', '') == trackId
+          && request.resource.data.get('userId', '') == request.auth.uid
+          && shortString(request.resource.data.get('title', ''), 500)
+          && shortString(request.resource.data.get('artist', ''), 500)
+          && shortString(request.resource.data.get('thumbnailUrl', ''), 2048)
+          && request.resource.data.get('duration', 0) is number
+          && request.resource.data.get('duration', 0) >= 0
+          && request.resource.data.get('duration', 0) <= 86400
+          && request.resource.data.get('position', -1) is number
+          && request.resource.data.get('position', -1) >= 0
+          && request.resource.data.get('position', -1) <= 86400
+          && shortString(request.resource.data.get('updatedAt', ''), 40);
         allow delete: if isOwner(userId);
       }
 
       match /listeningSessions/{sessionId} {
         allow get, list: if isOwner(userId) || isAdmin();
         allow create, update: if isOwner(userId)
-          && request.resource.data.userId == userId
-          && request.resource.data.videoId is string
-          && request.resource.data.secondsListened is number
-          && request.resource.data.secondsListened >= 0
-          && request.resource.data.secondsListened <= 86400;
+          && request.resource.data.keys().hasOnly([
+            'id', 'userId', 'videoId', 'title', 'artist', 'thumbnailUrl',
+            'duration', 'secondsListened', 'startedAt', 'updatedAt', 'completed'
+          ])
+          && request.resource.data.get('id', '') == sessionId
+          && request.resource.data.get('userId', '') == request.auth.uid
+          && shortString(request.resource.data.get('videoId', ''), 128)
+          && shortString(request.resource.data.get('title', ''), 500)
+          && shortString(request.resource.data.get('artist', ''), 500)
+          && shortString(request.resource.data.get('thumbnailUrl', ''), 2048)
+          && request.resource.data.get('duration', 0) is number
+          && request.resource.data.get('duration', 0) >= 0
+          && request.resource.data.get('duration', 0) <= 86400
+          && request.resource.data.get('secondsListened', -1) is number
+          && request.resource.data.get('secondsListened', -1) >= 0
+          && request.resource.data.get('secondsListened', -1) <= 86400
+          && shortString(request.resource.data.get('startedAt', ''), 40)
+          && shortString(request.resource.data.get('updatedAt', ''), 40)
+          && request.resource.data.get('completed', false) is bool;
         allow delete: if isOwner(userId);
       }
 
       match /settings/{settingId} {
-        allow get, list: if isOwner(userId);
-        allow create, update: if isOwner(userId);
+        allow get: if isOwner(userId) && settingId == 'preferences';
+        allow list: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && settingId == 'preferences'
+          && request.resource.data.keys().hasOnly([
+            'playbackQuality', 'downloadQuality', 'autoplay', 'theme', 'language', 'updatedAt'
+          ])
+          && request.resource.data.get('playbackQuality', '') in ['Low', 'Normal', 'High', 'Lossless']
+          && request.resource.data.get('downloadQuality', '') in ['Low', 'Normal', 'High']
+          && request.resource.data.get('autoplay', false) is bool
+          && request.resource.data.get('theme', '') in ['dark', 'light', 'system']
+          && shortString(request.resource.data.get('language', ''), 20)
+          && shortString(request.resource.data.get('updatedAt', ''), 40);
         allow delete: if false;
       }
     }
+
     match /sharedPlaylists/{shareId} {
-      // Unlisted share tokens allow direct document reads only, never collection listing.
-      allow get: if resource.data.isPublic == true;
+      // Share tokens are unlisted, high-entropy IDs; direct reads require an active public doc.
+      allow get: if resource.data.get('isPublic', false) == true;
       allow list: if false;
 
-      allow create: if isOwner(request.resource.data.ownerId)
-        && request.resource.data.shareId == shareId
-        && request.resource.data.playlistId is string
-        && request.resource.data.name is string
-        && request.resource.data.name.size() > 0
-        && request.resource.data.tracks is list
-        && request.resource.data.tracks.size() <= 500
-        && request.resource.data.isPublic == true;
+      allow create: if isOwner(request.resource.data.get('ownerId', ''))
+        && shareId.matches('^[a-fA-F0-9]{48}$')
+        && request.resource.data.keys().hasOnly([
+          'id', 'playlistId', 'shareId', 'ownerId', 'name', 'description',
+          'coverUrl', 'creator', 'trackCount', 'tracks', 'isPublic', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.get('shareId', '') == shareId
+        && shortString(request.resource.data.get('id', ''), 128)
+        && shortString(request.resource.data.get('playlistId', ''), 128)
+        && request.resource.data.get('ownerId', '') == request.auth.uid
+        && shortString(request.resource.data.get('name', ''), 100)
+        && request.resource.data.get('name', '').size() > 0
+        && shortString(request.resource.data.get('description', ''), 1000)
+        && shortString(request.resource.data.get('coverUrl', ''), 2048)
+        && shortString(request.resource.data.get('creator', ''), 100)
+        && request.resource.data.get('tracks', []) is list
+        && request.resource.data.get('tracks', []).size() <= 500
+        && request.resource.data.get('trackCount', -1) is int
+        && request.resource.data.get('trackCount', -1) == request.resource.data.get('tracks', []).size()
+        && request.resource.data.get('isPublic', false) == true
+        && shortString(request.resource.data.get('createdAt', ''), 40)
+        && shortString(request.resource.data.get('updatedAt', ''), 40);
 
-      allow update: if isOwner(resource.data.ownerId)
-        && request.resource.data.ownerId == resource.data.ownerId
-        && request.resource.data.shareId == shareId
-        && request.resource.data.tracks is list
-        && request.resource.data.tracks.size() <= 500
-        && request.resource.data.isPublic == true;
+      allow update: if isOwner(resource.data.get('ownerId', ''))
+        && request.resource.data.keys().hasOnly([
+          'id', 'playlistId', 'shareId', 'ownerId', 'name', 'description',
+          'coverUrl', 'creator', 'trackCount', 'tracks', 'isPublic', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.get('shareId', '') == shareId
+        && request.resource.data.get('ownerId', '') == resource.data.get('ownerId', '')
+        && shortString(request.resource.data.get('name', ''), 100)
+        && shortString(request.resource.data.get('description', ''), 1000)
+        && shortString(request.resource.data.get('coverUrl', ''), 2048)
+        && shortString(request.resource.data.get('creator', ''), 100)
+        && request.resource.data.get('tracks', []) is list
+        && request.resource.data.get('tracks', []).size() <= 500
+        && request.resource.data.get('trackCount', -1) is int
+        && request.resource.data.get('trackCount', -1) == request.resource.data.get('tracks', []).size()
+        && request.resource.data.get('isPublic', false) == true
+        && shortString(request.resource.data.get('createdAt', ''), 40)
+        && shortString(request.resource.data.get('updatedAt', ''), 40);
 
-      allow delete: if isOwner(resource.data.ownerId);
+      allow delete: if isOwner(resource.data.get('ownerId', ''));
     }
   }
 }
