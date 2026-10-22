@@ -280,7 +280,6 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
           </div>
         )}
       </div>
-    </div>
       <SharePlaylistModal
         isOpen={shareDialogOpen}
         playlist={playlist}
@@ -290,5 +289,6 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
           onRefreshPlaylists();
         }}
       />
+    </div>
   );
 };
