@@ -45,10 +45,15 @@ self.addEventListener('fetch', event => {
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
-        .then(response => {
+        .then(async response => {
           if (response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put('/index.html', copy));
+            try {
+              const copy = response.clone();
+              const cache = await caches.open(CACHE_NAME);
+              await cache.put('/index.html', copy);
+            } catch {
+              // Keep the online response usable even if storage is unavailable.
+            }
           }
           return response;
         })
@@ -72,10 +77,15 @@ self.addEventListener('fetch', event => {
 
   event.respondWith(
     fetch(request)
-      .then(response => {
+      .then(async response => {
         if (response.ok && response.type === 'basic') {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
+          try {
+            const copy = response.clone();
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put(request, copy);
+          } catch {
+            // Keep the online response usable even if storage is unavailable.
+          }
         }
         return response;
       })
