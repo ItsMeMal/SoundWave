@@ -3,7 +3,6 @@ import { ArrowLeft, BarChart3, Clock3, Headphones, LoaderCircle, Music2, ShieldA
 import { ViewType, ListeningSession } from '../types/music.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 import { getUserIsAdmin, subscribeAdminListeningSessions } from '../services/firebase.ts';
-import { formatTime } from '../utils/formatters.ts';
 
 interface ListeningStatsViewProps {
   onNavigate: (view: ViewType, payload?: any) => void;

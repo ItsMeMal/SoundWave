@@ -1,7 +1,7 @@
 import React from 'react';
 import { AudioLines, Info, Waves } from 'lucide-react';
 import { usePlayer } from '../../context/PlayerContext.tsx';
-import { EqualizerPreset } from '../../context/PlayerContext.tsx';
+import type { EqualizerPreset } from '../../context/PlayerContext.tsx';
 
 const presets: EqualizerPreset[] = ['Off', 'Flat', 'Bass Boost', 'Pop', 'Rock', 'Vocal', 'Treble'];
 const labels = ['60 Hz', '170 Hz', '350 Hz', '1 kHz', '3.5 kHz', '10 kHz'];

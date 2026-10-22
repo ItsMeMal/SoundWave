@@ -11,7 +11,9 @@ import {
   Shuffle, 
   Repeat,
   Repeat1,
-  FileText
+  FileText,
+  ListMusic,
+  ChevronUp
 } from 'lucide-react';
 import { usePlayer } from '../../context/PlayerContext.tsx';
 import { formatTime } from '../../utils/formatters.ts';
@@ -41,6 +43,12 @@ export const BottomPlayerBar: React.FC<BottomPlayerBarProps> = ({ onNavigate, cl
     cycleRepeat,
     nextTrack,
     prevTrack,
+    queue,
+    queueIndex,
+    reorderQueue,
+    removeFromQueue,
+    clearQueue,
+    playTrack,
     toggleLike,
     isLiked
   } = usePlayer();
@@ -262,6 +270,53 @@ export const BottomPlayerBar: React.FC<BottomPlayerBarProps> = ({ onNavigate, cl
             </div>
 
             <SleepTimerControl className="mt-5" />
+
+            {/* Touch-friendly queue reorder controls for the expanded mobile player. */}
+            <section className="mt-6 rounded-2xl border border-white/[0.07] bg-[#121620] p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="flex items-center gap-2 text-sm font-bold text-white">
+                  <ListMusic className="h-4 w-4 text-emerald-300" />
+                  Queue <span className="text-xs font-medium text-zinc-500">({queue.length})</span>
+                </h3>
+                {queue.length > 1 && (
+                  <button type="button" onClick={clearQueue} className="text-[11px] font-semibold text-rose-300 hover:text-rose-200">
+                    Clear upcoming
+                  </button>
+                )}
+              </div>
+              <div className="max-h-60 space-y-1 overflow-y-auto">
+                {queue.map((track, index) => (
+                  <div key={`${track.id}-${index}`} className={`flex items-center gap-2 rounded-xl p-2 ${index === queueIndex ? 'bg-emerald-400/[0.08]' : 'hover:bg-white/[0.03]'}`}>
+                    <button type="button" onClick={() => void playTrack(track, queue)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+                      <img src={track.thumbnailUrl} alt="" className="h-9 w-9 shrink-0 rounded-lg object-cover bg-zinc-800" />
+                      <span className="min-w-0 flex-1">
+                        <span className={`block truncate text-xs font-semibold ${index === queueIndex ? 'text-emerald-300' : 'text-white'}`}>{track.title}</span>
+                        <span className="block truncate text-[10px] text-zinc-500">{track.artist}</span>
+                      </span>
+                    </button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button type="button" onClick={() => reorderQueue(index, index - 1)} disabled={index === 0} aria-label={`Move ${track.title} up`}
+                        className="rounded-lg p-2 text-zinc-400 hover:bg-white/5 hover:text-white disabled:opacity-20">
+                        <ChevronUp className="h-4 w-4" />
+                      </button>
+                      <button type="button" onClick={() => reorderQueue(index, index + 1)} disabled={index === queue.length - 1} aria-label={`Move ${track.title} down`}
+                        className="rounded-lg p-2 text-zinc-400 hover:bg-white/5 hover:text-white disabled:opacity-20">
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                      {index !== queueIndex && (
+                        <button type="button" onClick={() => removeFromQueue(index)} aria-label={`Remove ${track.title} from queue`}
+                          className="rounded-lg px-2 py-1.5 text-[10px] font-bold text-rose-300 hover:bg-rose-400/10">
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {queue.length === 0 && <p className="py-6 text-center text-xs text-zinc-500">Your queue is empty.</p>}
+              </div>
+            </section>
+
+
 
             {/* Volume */}
             <div className="mt-8 flex items-center gap-3">
