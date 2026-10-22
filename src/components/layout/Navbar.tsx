@@ -24,7 +24,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   const { user, openAuthModal } = useAuth();
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const searchBoxRef = useRef<HTMLDivElement>(null);
+  const notificationRef = useRef<HTMLDivElement>(null);
 
   // Debounced autocomplete suggestions
   useEffect(() => {
@@ -47,8 +49,12 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (searchBoxRef.current && !searchBoxRef.current.contains(target)) {
         setShowSuggestions(false);
+      }
+      if (notificationRef.current && !notificationRef.current.contains(target)) {
+        setShowNotifications(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -137,14 +143,57 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Right Action Icons: Notification Bell & Avatar */}
       <div className="flex items-center gap-3">
-        <button
-          onClick={() => alert('All notifications are up to date.')}
-          className="p-2 text-zinc-400 hover:text-white rounded-full hover:bg-[#151922] transition-colors relative"
-          aria-label="Notifications"
-        >
-          <Bell className="w-5 h-5" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-emerald-400 rounded-full" />
-        </button>
+        <div className="relative shrink-0" ref={notificationRef}>
+          <button
+            type="button"
+            onClick={() => setShowNotifications(open => !open)}
+            className={`p-2 rounded-full transition-colors relative ${showNotifications ? 'bg-[#151922] text-white' : 'text-zinc-400 hover:text-white hover:bg-[#151922]'}`}
+            aria-label="Notifications"
+            aria-expanded={showNotifications}
+            aria-haspopup="dialog"
+          >
+            <Bell className="w-5 h-5" />
+          </button>
+
+          {showNotifications && (
+            <div
+              role="dialog"
+              aria-label="Notification center"
+              className="absolute right-0 top-12 z-[80] w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-white/10 bg-[#121720]/[0.98] shadow-2xl shadow-black/50 backdrop-blur-xl"
+            >
+              <div className="flex items-center gap-3 border-b border-white/5 px-4 py-3.5">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300">
+                  <Bell className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-sm font-bold text-white">Notifications</h2>
+                  <p className="mt-0.5 text-[11px] text-zinc-500">SoundWave activity</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowNotifications(false)}
+                  className="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-white/5 hover:text-white"
+                  aria-label="Close notifications"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="px-5 py-8 text-center">
+                <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full border border-white/5 bg-white/[0.03] text-zinc-500">
+                  <Bell className="h-6 w-6" />
+                </div>
+                <h3 className="text-sm font-semibold text-white">You’re all caught up</h3>
+                <p className="mx-auto mt-1.5 max-w-[15rem] text-xs leading-relaxed text-zinc-400">
+                  Account and playlist updates will appear here when notifications are available.
+                </p>
+              </div>
+              <div className="border-t border-white/5 bg-black/10 px-4 py-2.5">
+                <p className="text-center text-[10px] font-medium text-zinc-600">No new activity</p>
+              </div>
+            </div>
+          )}
+        </div>
 
         {user ? (
           <button
