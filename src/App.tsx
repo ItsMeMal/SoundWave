@@ -27,6 +27,7 @@ import { AuthModal } from './components/modals/AuthModal.tsx';
 import { CreatePlaylistModal } from './components/modals/CreatePlaylistModal.tsx';
 import { AddToPlaylistModal } from './components/modals/AddToPlaylistModal.tsx';
 import { ToastProvider } from './context/ToastContext.tsx';
+import { PWAInstallPrompt } from './components/common/PWAInstallPrompt.tsx';
 
 const AppContent: React.FC = () => {
   const { user } = useAuth();
@@ -214,6 +215,9 @@ const AppContent: React.FC = () => {
           className="hidden xl:flex"
         />
       </div>
+
+      {/* Install prompt appears only when the browser reports that installation is available. */}
+      <PWAInstallPrompt />
 
       {/* Bottom Audio Player Bar */}
       <BottomPlayerBar onNavigate={handleNavigate} />
