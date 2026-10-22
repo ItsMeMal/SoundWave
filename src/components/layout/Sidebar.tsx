@@ -124,7 +124,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {userPlaylists.map(pl => (
             <button
               key={pl.id}
-              onClick={() => onNavigate('playlist', { id: pl.id, playlist: pl, name: pl.name })}
+              onClick={() => onNavigate('playlist', { playlistId: pl.id, initialPlaylist: pl, name: pl.name })}
               className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-white hover:bg-[#151922] transition-colors truncate text-left"
             >
               <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
