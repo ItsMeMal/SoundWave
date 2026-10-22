@@ -26,6 +26,7 @@ import { SettingsView } from './views/SettingsView.tsx';
 import { AuthModal } from './components/modals/AuthModal.tsx';
 import { CreatePlaylistModal } from './components/modals/CreatePlaylistModal.tsx';
 import { AddToPlaylistModal } from './components/modals/AddToPlaylistModal.tsx';
+import { ToastProvider } from './context/ToastContext.tsx';
 
 const AppContent: React.FC = () => {
   const { user } = useAuth();
@@ -249,10 +250,12 @@ const AppContent: React.FC = () => {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <PlayerProvider>
-        <AppContent />
-      </PlayerProvider>
-    </AuthProvider>
+    <ToastProvider>
+      <AuthProvider>
+        <PlayerProvider>
+          <AppContent />
+        </PlayerProvider>
+      </AuthProvider>
+    </ToastProvider>
   );
 }
