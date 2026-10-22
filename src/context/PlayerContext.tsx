@@ -3,6 +3,7 @@ import { Track, LyricsResponse } from '../types/music.ts';
 import { getStreamUrl, getLyrics, getNextTracks, getRelatedTracks } from '../services/musicApi.ts';
 import { getNextTrackIndex, getPreviousTrackIndex, createShuffleIndices } from '../utils/playerLogic.ts';
 import { useAuth } from './AuthContext.tsx';
+import { useToast } from './ToastContext.tsx';
 import { 
   addLikedTrack, 
   removeLikedTrack, 
@@ -30,6 +31,8 @@ interface PlayerContextType {
   queueIndex: number;
   autoplay: boolean;
   playbackQuality: 'Low' | 'Normal' | 'High' | 'Lossless';
+  sleepTimerRemainingSeconds: number | null;
+  sleepTimerEndOfTrack: boolean;
   isStreamLoading: boolean;
   streamError: string | null;
   lyrics: LyricsResponse | null;
@@ -52,6 +55,9 @@ interface PlayerContextType {
   clearQueue: () => void;
   toggleAutoplay: () => void;
   setPlaybackQuality: (quality: 'Low' | 'Normal' | 'High' | 'Lossless') => void;
+  scheduleSleepTimer: (minutes: number) => void;
+  scheduleSleepTimerEndOfTrack: () => void;
+  cancelSleepTimer: () => void;
   toggleLike: (track: Track) => Promise<void>;
   isLiked: (trackId: string) => boolean;
   fetchLyricsForCurrent: () => Promise<void>;
@@ -62,6 +68,7 @@ const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
 
 export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, openAuthModal } = useAuth();
+  const { notify } = useToast();
 
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -76,6 +83,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [shuffledIndices, setShuffledIndices] = useState<number[]>([]);
   const [autoplay, setAutoplay] = useState<boolean>(true);
   const [playbackQuality, setPlaybackQuality] = useState<'Low' | 'Normal' | 'High' | 'Lossless'>('High');
+  const [sleepTimerEndAt, setSleepTimerEndAt] = useState<number | null>(null);
+  const [sleepTimerRemainingSeconds, setSleepTimerRemainingSeconds] = useState<number | null>(null);
+  const [sleepTimerEndOfTrack, setSleepTimerEndOfTrack] = useState(false);
   const [isStreamLoading, setIsStreamLoading] = useState<boolean>(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [lyrics, setLyrics] = useState<LyricsResponse | null>(null);
@@ -220,6 +230,36 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [isPlaying, duration]);
+
+  // Sleep timer: pause playback after a duration without relying on tab visibility.
+  useEffect(() => {
+    if (sleepTimerEndAt === null) return;
+
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((sleepTimerEndAt - Date.now()) / 1000));
+      setSleepTimerRemainingSeconds(remaining);
+      if (remaining > 0) return;
+
+      setSleepTimerEndAt(null);
+      setSleepTimerRemainingSeconds(null);
+      setSleepTimerEndOfTrack(false);
+
+      if (isUsingYtRef.current && ytPlayerRef.current?.pauseVideo) {
+        ytPlayerRef.current.pauseVideo();
+      } else {
+        audioRef.current?.pause();
+      }
+      setIsPlaying(false);
+      notify({
+        variant: 'info',
+        title: 'Sleep timer finished',
+        description: 'Playback has been paused.',
+      });
+    };
+
+    const interval = window.setInterval(tick, 1000);
+    return () => window.clearInterval(interval);
+  }, [sleepTimerEndAt, notify]);
 
   // Expose the current song and remote media controls to the OS lock screen/media notification.
   useEffect(() => {
@@ -435,6 +475,19 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const handleTrackEnded = () => {
+    if (sleepTimerEndOfTrack) {
+      setSleepTimerEndOfTrack(false);
+      setIsPlaying(false);
+      setCurrentTime(duration > 0 ? duration : currentTime);
+      setIsStreamLoading(false);
+      notify({
+        variant: 'info',
+        title: 'Sleep timer finished',
+        description: 'Playback stopped at the end of the track.',
+      });
+      return;
+    }
+
     if (repeatMode === 'one') {
       setCurrentTime(0);
       setIsStreamLoading(false);
@@ -656,6 +709,43 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setAutoplay(prev => !prev);
   };
 
+  const scheduleSleepTimer = (minutes: number) => {
+    if (!Number.isFinite(minutes) || minutes <= 0) return;
+    const endsAt = Date.now() + Math.round(minutes * 60) * 1000;
+    setSleepTimerEndOfTrack(false);
+    setSleepTimerEndAt(endsAt);
+    setSleepTimerRemainingSeconds(Math.round(minutes * 60));
+    notify({
+      variant: 'success',
+      title: 'Sleep timer set',
+      description: `Playback will pause in ${minutes} minutes.`,
+    });
+  };
+
+  const scheduleSleepTimerEndOfTrack = () => {
+    setSleepTimerEndAt(null);
+    setSleepTimerRemainingSeconds(null);
+    setSleepTimerEndOfTrack(true);
+    notify({
+      variant: 'success',
+      title: 'Sleep timer set',
+      description: 'Playback will pause when the current track ends.',
+    });
+  };
+
+  const cancelSleepTimer = () => {
+    const wasActive = sleepTimerEndAt !== null || sleepTimerEndOfTrack;
+    setSleepTimerEndAt(null);
+    setSleepTimerRemainingSeconds(null);
+    setSleepTimerEndOfTrack(false);
+    if (wasActive) {
+      notify({
+        variant: 'info',
+        title: 'Sleep timer cancelled',
+      });
+    }
+  };
+
   const toggleLike = async (track: Track) => {
     if (!user) {
       openAuthModal('login');
@@ -704,6 +794,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         queueIndex,
         autoplay,
         playbackQuality,
+        sleepTimerRemainingSeconds,
+        sleepTimerEndOfTrack,
         isStreamLoading,
         streamError,
         lyrics,
@@ -724,6 +816,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         clearQueue,
         toggleAutoplay,
         setPlaybackQuality,
+        scheduleSleepTimer,
+        scheduleSleepTimerEndOfTrack,
+        cancelSleepTimer,
         toggleLike,
         isLiked,
         fetchLyricsForCurrent,
