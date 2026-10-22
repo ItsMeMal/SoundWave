@@ -1,0 +1,33 @@
+name: Security audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Dependency audit and production build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Use patched Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+      - name: Install dependencies
+        run: npm install --no-fund --no-audit
+      - name: Audit dependencies for high and critical vulnerabilities
+        run: npm audit --audit-level=high
+      - name: Type-check
+        run: npm run lint
+      - name: Build production assets
+        run: npm run build
