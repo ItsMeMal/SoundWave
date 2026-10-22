@@ -271,6 +271,22 @@ export async function getLyrics(videoId: string, track?: Track): Promise<LyricsR
 
   if (!track?.title || !track.artist) return fallback;
 
+  const clientHeaders = {
+    'Lrclib-Client': 'SoundWave/1.0 (https://github.com/ItsMeMal/SoundWave)',
+  };
+  const requestJson = async (url: string): Promise<any | null> => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 7000);
+    try {
+      const response = await fetch(url, { signal: controller.signal, headers: clientHeaders });
+      return response.ok ? await response.json() : null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  // First try LRCLIB's precise signature endpoint. Its duration matching is strict,
+  // so a YouTube upload may miss even when the song has synced lyrics available.
   try {
     const params = new URLSearchParams({
       track_name: track.title,
@@ -281,20 +297,8 @@ export async function getLyrics(videoId: string, track?: Track): Promise<LyricsR
       params.set('duration', String(Math.round(track.duration)));
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 7000);
-    let response: Response;
-    try {
-      response = await fetch(`https://lrclib.net/api/get?${params.toString()}`, {
-        signal: controller.signal,
-        headers: { 'Lrclib-Client': 'SoundWave/1.0 (https://github.com/ItsMeMal/SoundWave)' },
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
-
-    if (response.ok) {
-      const data = await response.json();
+    const data = await requestJson(`https://lrclib.net/api/get?${params.toString()}`);
+    if (data) {
       const syncedLyrics = typeof data.syncedLyrics === 'string' ? data.syncedLyrics : '';
       if (syncedLyrics && hasTimestamps(syncedLyrics)) {
         return { id: videoId, source: 'LRCLIB', lyrics: syncedLyrics };
@@ -306,7 +310,68 @@ export async function getLyrics(videoId: string, track?: Track): Promise<LyricsR
       }
     }
   } catch {
-    // The primary music API may still have usable plain lyrics.
+    // Search endpoint below may still find an existing timed version.
+  }
+
+  // Search more broadly if exact matching failed (for example, video duration differs
+  // from the original studio recording). Only accept a title + artist match.
+  try {
+    const params = new URLSearchParams({
+      track_name: track.title,
+      artist_name: track.artist,
+    });
+    if (track.album) params.set('album_name', track.album);
+
+    const records = await requestJson(`https://lrclib.net/api/search?${params.toString()}`);
+    if (Array.isArray(records)) {
+      const normalize = (value: string) => value
+        .toLowerCase()
+        .normalize('NFKD')
+        .replace(/[\\u0300-\\u036f]/g, '')
+        .replace(/\\([^)]*(?:official|lyrics?|audio|video|visualizer|remaster)[^)]*\\)/gi, '')
+        .replace(/\\b(?:official audio|official video|lyric video|lyrics?|audio|visualizer|remastered)\\b/gi, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+      const wantedTitle = normalize(track.title);
+      const wantedArtist = normalize(track.artist);
+
+      const candidates = records
+        .filter((item: any) =>
+          typeof item.syncedLyrics === 'string' &&
+          hasTimestamps(item.syncedLyrics) &&
+          normalize(item.trackName || item.name || '') === wantedTitle &&
+          normalize(item.artistName || '') === wantedArtist
+        )
+        .map((item: any) => ({
+          item,
+          durationDifference: typeof item.duration === 'number' && track.duration > 0
+            ? Math.abs(item.duration - track.duration)
+            : Number.MAX_SAFE_INTEGER,
+        }))
+        .sort((a: any, b: any) => a.durationDifference - b.durationDifference);
+
+      if (candidates.length > 0) {
+        return {
+          id: videoId,
+          source: 'LRCLIB',
+          lyrics: candidates[0].item.syncedLyrics,
+        };
+      }
+
+      // Use plain lyrics only when no timestamped match was found.
+      if (!fallback) {
+        const plainMatch = records.find((item: any) =>
+          typeof item.plainLyrics === 'string' &&
+          normalize(item.trackName || item.name || '') === wantedTitle &&
+          normalize(item.artistName || '') === wantedArtist
+        );
+        if (plainMatch) {
+          fallback = { id: videoId, source: 'LRCLIB', lyrics: plainMatch.plainLyrics };
+        }
+      }
+    }
+  } catch {
+    // Keep any usable plain lyrics from the primary source.
   }
 
   return fallback;
