@@ -27,9 +27,14 @@ export const LyricsView: React.FC<LyricsViewProps> = ({ onNavigate }) => {
     return parseLyrics(lyrics.lyrics);
   }, [lyrics?.lyrics]);
 
-  // Determine active line index based on playback currentTime
+  // Plain lyrics have no timestamps, so they cannot follow playback time.
+  const hasSyncedLyrics = useMemo(
+    () => parsedLines.some(line => line.time !== undefined),
+    [parsedLines]
+  );
+
   const activeIndex = useMemo(() => {
-    if (parsedLines.length === 0) return -1;
+    if (!hasSyncedLyrics || parsedLines.length === 0) return -1;
     let foundIndex = -1;
     for (let i = 0; i < parsedLines.length; i++) {
       const lineTime = parsedLines[i].time;
@@ -40,29 +45,38 @@ export const LyricsView: React.FC<LyricsViewProps> = ({ onNavigate }) => {
       }
     }
     return foundIndex;
-  }, [parsedLines, currentTime]);
+  }, [parsedLines, currentTime, hasSyncedLyrics]);
 
-  // Auto-scroll active lyric into view if user isn't actively manual scrolling
+  // Keep the active timed line near the center, but pause while the listener scrolls.
   useEffect(() => {
-    if (!userScrolled && activeLineRef.current && containerRef.current) {
+    if (hasSyncedLyrics && !userScrolled && activeLineRef.current) {
       activeLineRef.current.scrollIntoView({
         behavior: 'smooth',
         block: 'center',
       });
     }
-  }, [activeIndex, userScrolled]);
+  }, [activeIndex, userScrolled, hasSyncedLyrics]);
 
-  // Reset userScrolled timeout after user interaction
-  const handleScroll = () => {
+  const userScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleUserScroll = () => {
     setUserScrolled(true);
-    const timeout = setTimeout(() => setUserScrolled(false), 5000);
-    return () => clearTimeout(timeout);
+    if (userScrollTimeoutRef.current) clearTimeout(userScrollTimeoutRef.current);
+    userScrollTimeoutRef.current = setTimeout(() => {
+      setUserScrolled(false);
+      userScrollTimeoutRef.current = null;
+    }, 4500);
   };
+
+  useEffect(() => () => {
+    if (userScrollTimeoutRef.current) clearTimeout(userScrollTimeoutRef.current);
+  }, []);
 
   return (
     <div 
       ref={containerRef}
-      onScroll={handleScroll}
+      onWheel={handleUserScroll}
+      onTouchMove={handleUserScroll}
       className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-10 relative bg-gradient-to-b from-[#111927]/60 via-[#0a0d14] to-[#0a0d14]"
     >
       {/* Top Bar with Back Button */}
@@ -78,7 +92,7 @@ export const LyricsView: React.FC<LyricsViewProps> = ({ onNavigate }) => {
         {lyrics?.source && (
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Synced Lyrics ({lyrics.source})</span>
+            <span>{hasSyncedLyrics ? `Synced Lyrics · ${lyrics.source}` : `Lyrics · ${lyrics.source}`}</span>
           </div>
         )}
       </div>
@@ -143,33 +157,38 @@ export const LyricsView: React.FC<LyricsViewProps> = ({ onNavigate }) => {
               </button>
             </div>
           ) : (
-            <div className="space-y-6 pb-20 select-none">
+            <div className={`pb-[38vh] select-none ${hasSyncedLyrics ? 'space-y-7 md:space-y-8' : 'space-y-5 md:space-y-6'}`}>
+              {!hasSyncedLyrics && (
+                <p className="text-xs md:text-sm text-zinc-500 mb-6">
+                  Lyrics are available, but timestamps are not available for this version.
+                </p>
+              )}
               {parsedLines.map((line, idx) => {
                 const isActive = idx === activeIndex;
                 const isPast = activeIndex !== -1 && idx < activeIndex;
                 const isClickable = line.time !== undefined;
 
+                const lineStyle = hasSyncedLyrics
+                  ? isActive
+                    ? 'text-white text-3xl md:text-4xl font-extrabold tracking-tight leading-tight scale-[1.01] origin-left drop-shadow-[0_0_24px_rgba(16,185,129,0.12)]'
+                    : isPast
+                      ? 'text-zinc-600 hover:text-zinc-300 text-xl md:text-2xl font-semibold leading-snug'
+                      : 'text-zinc-400 hover:text-white text-xl md:text-2xl font-semibold leading-snug'
+                  : 'text-zinc-200 hover:text-white text-xl md:text-2xl font-semibold leading-relaxed';
+
                 return (
-                  <p
+                  <button
+                    type="button"
                     key={idx}
                     ref={isActive ? activeLineRef : null}
+                    disabled={!isClickable}
                     onClick={() => {
-                      if (line.time !== undefined) {
-                        seek(line.time);
-                      }
+                      if (line.time !== undefined) seek(line.time);
                     }}
-                    className={`transition-all duration-300 ${
-                      isClickable ? 'cursor-pointer' : ''
-                    } ${
-                      isActive
-                        ? 'text-white text-2xl md:text-3xl font-extrabold tracking-tight scale-102 origin-left py-1 text-emerald-400 drop-shadow-md'
-                        : isPast
-                        ? 'text-zinc-500 hover:text-zinc-300 text-lg md:text-xl font-medium'
-                        : 'text-zinc-600 hover:text-zinc-400 text-lg md:text-xl font-medium'
-                    }`}
+                    className={`block w-full rounded-lg bg-transparent p-0 text-left transition-all duration-300 ease-out disabled:cursor-default ${isClickable ? 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60' : ''} ${lineStyle}`}
                   >
                     {line.text}
-                  </p>
+                  </button>
                 );
               })}
             </div>
