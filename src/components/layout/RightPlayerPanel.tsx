@@ -15,7 +15,8 @@ import {
   Trash2,
   Plus,
   Music,
-  RotateCcw
+  RotateCcw,
+  GripVertical
 } from 'lucide-react';
 import { usePlayer } from '../../context/PlayerContext.tsx';
 import { formatTime } from '../../utils/formatters.ts';
@@ -57,6 +58,7 @@ export const RightPlayerPanel: React.FC<RightPlayerPanelProps> = ({
     nextTrack,
     prevTrack,
     removeFromQueue,
+    reorderQueue,
     clearQueue,
     toggleAutoplay,
     toggleLike,
@@ -66,6 +68,7 @@ export const RightPlayerPanel: React.FC<RightPlayerPanelProps> = ({
 
   const [activeTab, setActiveTab] = useState<'playing' | 'queue'>('playing');
   const [showOptions, setShowOptions] = useState(false);
+  const [draggingQueueIndex, setDraggingQueueIndex] = useState<number | null>(null);
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
   const isCurrentLiked = currentTrack ? isLiked(currentTrack.id) : false;
@@ -432,14 +435,33 @@ export const RightPlayerPanel: React.FC<RightPlayerPanelProps> = ({
               return (
                 <div
                   key={`${track.id}-${idx}`}
+                  draggable
+                  onDragStart={event => {
+                    setDraggingQueueIndex(idx);
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', String(idx));
+                  }}
+                  onDragOver={event => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                  }}
+                  onDrop={event => {
+                    event.preventDefault();
+                    const from = draggingQueueIndex ?? Number(event.dataTransfer.getData('text/plain'));
+                    if (Number.isInteger(from)) reorderQueue(from, idx);
+                    setDraggingQueueIndex(null);
+                  }}
+                  onDragEnd={() => setDraggingQueueIndex(null)}
                   className={`flex items-center justify-between p-2 rounded-lg transition-colors group ${
                     isCurrent ? 'bg-emerald-500/10 border border-emerald-500/30' : 'hover:bg-[#161a22]'
-                  }`}
+                  } ${draggingQueueIndex === idx ? 'opacity-40' : ''} cursor-grab active:cursor-grabbing`}
+                  title="Drag to reorder queue"
                 >
-                  <div 
+                  <div
                     onClick={() => playTrack(track, queue)}
                     className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer"
                   >
+                    <GripVertical className="h-3.5 w-3.5 text-zinc-600 shrink-0" />
                     <span className="text-xs text-zinc-500 w-4 font-mono text-center">
                       {isCurrent ? <span className="text-emerald-400 font-bold">▶</span> : idx + 1}
                     </span>

@@ -8,7 +8,10 @@ import {
   addLikedTrack, 
   removeLikedTrack, 
   subscribeLikedTracks, 
-  addPlaybackHistory 
+  addPlaybackHistory,
+  savePlaybackProgress,
+  clearPlaybackProgress,
+  saveListeningSession,
 } from '../services/firebase.ts';
 
 declare global {
@@ -16,6 +19,28 @@ declare global {
     YT: any;
     onYouTubeIframeAPIReady: any;
   }
+}
+
+export type EqualizerPreset = 'Off' | 'Flat' | 'Bass Boost' | 'Pop' | 'Rock' | 'Vocal' | 'Treble' | 'Custom';
+
+const EQUALIZER_PRESETS: Record<EqualizerPreset, number[]> = {
+  Off: [0, 0, 0, 0, 0, 0],
+  Flat: [0, 0, 0, 0, 0, 0],
+  'Bass Boost': [8, 5, 2, 0, 1, 2],
+  Pop: [-1, 2, 4, 3, 1, -1],
+  Rock: [5, 3, -1, 2, 4, 5],
+  Vocal: [-2, 0, 3, 5, 3, 0],
+  Treble: [-2, -1, 0, 1, 4, 7],
+  Custom: [0, 0, 0, 0, 0, 0],
+};
+
+interface ActiveListeningSession {
+  id: string;
+  userId: string;
+  track: Track;
+  sessionStartedAt: string;
+  elapsedSeconds: number;
+  playingSince: number | null;
 }
 
 interface PlayerContextType {
@@ -31,6 +56,8 @@ interface PlayerContextType {
   queueIndex: number;
   autoplay: boolean;
   playbackQuality: 'Low' | 'Normal' | 'High' | 'Lossless';
+  equalizerPreset: EqualizerPreset;
+  equalizerBands: number[];
   sleepTimerRemainingSeconds: number | null;
   sleepTimerEndOfTrack: boolean;
   isStreamLoading: boolean;
@@ -41,7 +68,11 @@ interface PlayerContextType {
   likedTracksList: Track[];
 
   // Actions
-  playTrack: (track: Track, newQueue?: Track[]) => Promise<void>;
+  playTrack: (track: Track, newQueue?: Track[], startAtSeconds?: number) => Promise<void>;
+  resumeTrack: (track: Track, position: number) => Promise<void>;
+  reorderQueue: (fromIndex: number, toIndex: number) => void;
+  setEqualizerPreset: (preset: EqualizerPreset) => void;
+  setEqualizerBand: (index: number, gain: number) => void;
   togglePlay: () => void;
   seek: (time: number) => void;
   setVolume: (vol: number) => void;
@@ -83,6 +114,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [shuffledIndices, setShuffledIndices] = useState<number[]>([]);
   const [autoplay, setAutoplay] = useState<boolean>(true);
   const [playbackQuality, setPlaybackQuality] = useState<'Low' | 'Normal' | 'High' | 'Lossless'>('High');
+  const [equalizerPreset, setEqualizerPresetState] = useState<EqualizerPreset>('Off');
+  const [equalizerBands, setEqualizerBands] = useState<number[]>(EQUALIZER_PRESETS.Off);
   const [sleepTimerEndAt, setSleepTimerEndAt] = useState<number | null>(null);
   const [sleepTimerRemainingSeconds, setSleepTimerRemainingSeconds] = useState<number | null>(null);
   const [sleepTimerEndOfTrack, setSleepTimerEndOfTrack] = useState(false);
@@ -103,6 +136,145 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // YouTube's iframe callbacks are created once; refs keep them connected to current React state.
   const handleTrackEndedRef = useRef<() => void>(() => {});
   const nextTrackRef = useRef<() => Promise<void>>(async () => {});
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const equalizerFiltersRef = useRef<BiquadFilterNode[]>([]);
+  const currentTrackRef = useRef<Track | null>(currentTrack);
+  const currentTimeRef = useRef(currentTime);
+  const durationRef = useRef(duration);
+  const userIdRef = useRef(user?.uid || null);
+  const activeSessionRef = useRef<ActiveListeningSession | null>(null);
+  currentTrackRef.current = currentTrack;
+  currentTimeRef.current = currentTime;
+  durationRef.current = duration;
+  userIdRef.current = user?.uid || null;
+
+  const persistCurrentProgress = (
+    track = currentTrackRef.current,
+    position = currentTimeRef.current,
+    actualDuration = durationRef.current
+  ) => {
+    const userId = userIdRef.current;
+    if (!userId || !track || !Number.isFinite(position) || position < 5) return;
+    void savePlaybackProgress(userId, track, position, actualDuration);
+  };
+
+  const writeActiveSession = (mode: 'snapshot' | 'pause' | 'finish', completed = false) => {
+    const session = activeSessionRef.current;
+    if (!session) return;
+    const elapsed = session.elapsedSeconds + (session.playingSince === null
+      ? 0 : Math.max(0, Math.floor((Date.now() - session.playingSince) / 1000)));
+    void saveListeningSession(session.userId, session.id, session.track, elapsed, session.sessionStartedAt, completed);
+    if (mode === 'pause') activeSessionRef.current = { ...session, elapsedSeconds: elapsed, playingSince: null };
+    else if (mode === 'finish') activeSessionRef.current = null;
+  };
+
+  const resumeListeningSession = (track: Track | null) => {
+    const userId = userIdRef.current;
+    if (!userId || !track) return;
+    const existing = activeSessionRef.current;
+    if (existing && existing.userId === userId && existing.track.id === track.id) {
+      if (existing.playingSince === null) activeSessionRef.current = { ...existing, playingSince: Date.now() };
+      return;
+    }
+    writeActiveSession('finish');
+    const startedAt = new Date().toISOString();
+    const session: ActiveListeningSession = {
+      id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID() : `session_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      userId, track, sessionStartedAt: startedAt, elapsedSeconds: 0, playingSince: Date.now(),
+    };
+    activeSessionRef.current = session;
+    void saveListeningSession(userId, session.id, track, 0, startedAt);
+  };
+
+  const initializeEqualizer = async (gains: number[]) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audioSourceNodeRef.current && audioContextRef.current) {
+      equalizerFiltersRef.current.forEach((filter, index) => { filter.gain.value = gains[index] || 0; });
+      if (audioContextRef.current.state === 'suspended') await audioContextRef.current.resume();
+      return;
+    }
+    const originalSource = audio.currentSrc || audio.src;
+    const wasUsingYoutube = isUsingYtRef.current;
+    const wasPlaying = !audio.paused && !wasUsingYoutube;
+    const previousPosition = audio.currentTime || currentTimeRef.current;
+    const trackId = currentTrackRef.current?.id;
+    audio.pause();
+    audio.crossOrigin = 'anonymous';
+    if (originalSource && !wasUsingYoutube) {
+      audio.removeAttribute('src');
+      audio.load();
+    }
+    const AudioContextConstructor = window.AudioContext;
+    if (!AudioContextConstructor) throw new Error('Web Audio API is not supported by this browser.');
+    const context = new AudioContextConstructor();
+    const source = context.createMediaElementSource(audio);
+    const frequencies = [60, 170, 350, 1000, 3500, 10000];
+    const filters = frequencies.map((frequency, index) => {
+      const filter = context.createBiquadFilter();
+      filter.type = index === 0 ? 'lowshelf' : index === frequencies.length - 1 ? 'highshelf' : 'peaking';
+      filter.frequency.value = frequency;
+      if (filter.type === 'peaking') filter.Q.value = 1;
+      filter.gain.value = gains[index] || 0;
+      return filter;
+    });
+    source.connect(filters[0]);
+    for (let index = 0; index < filters.length - 1; index++) filters[index].connect(filters[index + 1]);
+    filters[filters.length - 1].connect(context.destination);
+    audioContextRef.current = context;
+    audioSourceNodeRef.current = source;
+    equalizerFiltersRef.current = filters;
+    if (originalSource && !wasUsingYoutube) {
+      audio.addEventListener('loadedmetadata', () => {
+        if (trackId && currentTrackRef.current?.id !== trackId) return;
+        try {
+          audio.currentTime = Math.min(previousPosition, Number.isFinite(audio.duration) ? audio.duration : previousPosition);
+          setCurrentTime(audio.currentTime);
+        } catch { /* Stream metadata may not be seekable yet. */ }
+        if (wasPlaying) void audio.play().catch(() => {
+          // Streams without CORS support fall back to the existing YouTube playback engine.
+        });
+      }, { once: true });
+      audio.src = originalSource;
+      audio.load();
+    }
+    await context.resume();
+  };
+
+  const changeEqualizerPreset = (preset: EqualizerPreset) => {
+    const gains = [...EQUALIZER_PRESETS[preset]];
+    setEqualizerPresetState(preset);
+    setEqualizerBands(gains);
+    if (preset === 'Off' || preset === 'Flat') {
+      equalizerFiltersRef.current.forEach((filter, index) => { filter.gain.value = gains[index] || 0; });
+      return;
+    }
+    void initializeEqualizer(gains).catch(error => notify({
+      variant: 'warning',
+      title: 'Equalizer is unavailable',
+      description: error instanceof Error ? error.message : 'This stream or browser does not support audio processing.',
+    }));
+  };
+
+  const changeEqualizerBand = (index: number, gain: number) => {
+    if (index < 0 || index >= 6) return;
+    const next = [...equalizerBands];
+    next[index] = Math.max(-12, Math.min(12, gain));
+    setEqualizerBands(next);
+    setEqualizerPresetState('Custom');
+    if (audioSourceNodeRef.current) {
+      if (equalizerFiltersRef.current[index]) equalizerFiltersRef.current[index].gain.value = next[index];
+    } else if (next.some(value => value !== 0)) {
+      void initializeEqualizer(next).catch(error => notify({
+        variant: 'warning',
+        title: 'Equalizer is unavailable',
+        description: error instanceof Error ? error.message : 'This stream or browser does not support audio processing.',
+      }));
+    }
+  };
+
   const mediaActionsRef = useRef({
     play: () => {},
     pause: () => {},
@@ -139,6 +311,26 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => unsubscribe();
   }, [user]);
 
+  useEffect(() => {
+    if (!user?.uid || !currentTrack || !isPlaying) return;
+    const interval = window.setInterval(() => {
+      const track = currentTrackRef.current;
+      const position = currentTimeRef.current;
+      if (track && position >= 5) persistCurrentProgress(track, position, durationRef.current);
+      writeActiveSession('snapshot');
+    }, 15000);
+    return () => window.clearInterval(interval);
+  }, [user?.uid, currentTrack?.id, isPlaying]);
+
+  useEffect(() => {
+    const onPageHide = () => {
+      persistCurrentProgress();
+      writeActiveSession('snapshot');
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, []);
+
   // Initialize resilient background audio engine (YouTube IFrame API)
   useEffect(() => {
     if (!window.YT) {
@@ -169,6 +361,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               onStateChange: (event: any) => {
                 if (event.data === 1) { // PLAYING
                   setIsPlaying(true);
+                  resumeListeningSession(currentTrackRef.current);
                   setIsStreamLoading(false);
                   setStreamError(null);
                 } else if (event.data === 2) { // PAUSED
@@ -352,8 +545,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [currentTime, duration]);
 
   // Real track playback
-  const playTrack = async (track: Track, newQueue?: Track[]) => {
+  const playTrack = async (track: Track, newQueue?: Track[], startAtSeconds = 0) => {
     if (!track || !track.id) return;
+    if (currentTrack && currentTime > 5) persistCurrentProgress(currentTrack, currentTime, duration);
+    writeActiveSession('finish');
 
     setIsStreamLoading(true);
     setStreamError(null);
@@ -407,6 +602,17 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (ytPlayerRef.current?.pauseVideo) {
           ytPlayerRef.current.pauseVideo();
         }
+        if (audioSourceNodeRef.current) audioRef.current.crossOrigin = 'anonymous';
+        if (startAtSeconds > 0) {
+          const audio = audioRef.current;
+          audio.addEventListener('loadedmetadata', () => {
+            if (currentTrackRef.current?.id !== track.id) return;
+            try {
+              audio.currentTime = Math.min(startAtSeconds, Number.isFinite(audio.duration) ? audio.duration : startAtSeconds);
+              setCurrentTime(audio.currentTime);
+            } catch { /* Seek when metadata is ready. */ }
+          }, { once: true });
+        }
         audioRef.current.src = streamUrl;
         audioRef.current.volume = isMuted ? 0 : volume;
         const playPromise = audioRef.current.play();
@@ -415,6 +621,13 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setIsPlaying(true);
           setIsStreamLoading(false);
           setStreamError(null);
+          if (startAtSeconds > 0 && currentTrackRef.current?.id === track.id) {
+            try {
+              audioRef.current.currentTime = Math.min(startAtSeconds, Number.isFinite(audioRef.current.duration) ? audioRef.current.duration : startAtSeconds);
+              setCurrentTime(audioRef.current.currentTime);
+            } catch { /* The loadedmetadata handler above will seek. */ }
+          }
+          resumeListeningSession(track);
           return;
         }
       }
@@ -433,6 +646,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         ytPlayerRef.current.loadVideoById(track.id);
         ytPlayerRef.current.setVolume(isMuted ? 0 : volume * 100);
         ytPlayerRef.current.playVideo();
+        if (startAtSeconds > 0) {
+          window.setTimeout(() => {
+            if (currentTrackRef.current?.id !== track.id || !ytPlayerRef.current?.seekTo) return;
+            ytPlayerRef.current.seekTo(startAtSeconds, true);
+            setCurrentTime(startAtSeconds);
+          }, 900);
+        }
+        resumeListeningSession(track);
         setIsPlaying(true);
         setIsStreamLoading(false);
         setStreamError(null);
@@ -444,6 +665,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     setIsStreamLoading(false);
     setStreamError('Audio stream unavailable. Click to retry.');
+  };
+
+  const resumeTrack = async (track: Track, position: number) => {
+    await playTrack(track, [track], Math.max(0, Number.isFinite(position) ? position : 0));
   };
 
   const retryCurrentStream = async () => {
@@ -475,6 +700,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const handleTrackEnded = () => {
+    if (currentTrack && userIdRef.current) void clearPlaybackProgress(userIdRef.current, currentTrack.id);
+    writeActiveSession('finish', true);
     if (sleepTimerEndOfTrack) {
       setSleepTimerEndOfTrack(false);
       setIsPlaying(false);
@@ -514,6 +741,22 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setCurrentTime(previous => duration > 0 ? duration : previous);
     setIsPlaying(false);
     void nextTrack();
+  };
+
+  const reorderQueue = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= queue.length || toIndex >= queue.length) return;
+    const nextQueue = [...queue];
+    const [moved] = nextQueue.splice(fromIndex, 1);
+    nextQueue.splice(toIndex, 0, moved);
+    const mapOldIndex = (oldIndex: number) => {
+      if (oldIndex === fromIndex) return toIndex;
+      if (fromIndex < toIndex && oldIndex > fromIndex && oldIndex <= toIndex) return oldIndex - 1;
+      if (fromIndex > toIndex && oldIndex >= toIndex && oldIndex < fromIndex) return oldIndex + 1;
+      return oldIndex;
+    };
+    setQueue(nextQueue);
+    setQueueIndex(previous => mapOldIndex(previous));
+    setShuffledIndices(previous => previous.map(mapOldIndex));
   };
 
   const togglePlay = () => {
@@ -794,6 +1037,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         queueIndex,
         autoplay,
         playbackQuality,
+        equalizerPreset,
+        equalizerBands,
         sleepTimerRemainingSeconds,
         sleepTimerEndOfTrack,
         isStreamLoading,
@@ -803,6 +1048,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         likedTrackIds,
         likedTracksList,
         playTrack,
+        resumeTrack,
+        reorderQueue,
+        setEqualizerPreset: changeEqualizerPreset,
+        setEqualizerBand: changeEqualizerBand,
         togglePlay,
         seek,
         setVolume,
@@ -831,11 +1080,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           if (!isUsingYtRef.current) {
             setIsPlaying(true);
             setStreamError(null);
+            resumeListeningSession(currentTrackRef.current);
           }
         }}
         onPause={() => {
           if (!isUsingYtRef.current && !audioRef.current?.ended) {
             setIsPlaying(false);
+            persistCurrentProgress();
+            writeActiveSession('pause');
           }
         }}
         onEnded={handleTrackEnded}

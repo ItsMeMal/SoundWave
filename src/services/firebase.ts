@@ -26,7 +26,7 @@ import {
   limit, 
   Unsubscribe 
 } from 'firebase/firestore';
-import { Track, Playlist, LikedTrackItem, PlaybackHistoryItem, UserProfile, UserSettings } from '../types/music.ts';
+import { Track, Playlist, LikedTrackItem, PlaybackHistoryItem, PlaybackProgressItem, ListeningSession, UserProfile, UserSettings } from '../types/music.ts';
 
 // Firebase Web configuration is public client configuration, supplied per deployment.
 // Keep secrets (for example, service-account keys) out of VITE_* variables.
@@ -446,6 +446,66 @@ export async function addPlaybackHistory(userId: string, track: Track): Promise<
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
+}
+
+// Continue Listening: private per-user playback positions for cross-device resume.
+export function subscribePlaybackProgress(userId: string, onUpdate: (items: PlaybackProgressItem[]) => void): Unsubscribe {
+  const q = query(collection(db, 'users', userId, 'playbackProgress'), orderBy('updatedAt', 'desc'), limit(12));
+  return onSnapshot(q, snapshot => {
+    onUpdate(snapshot.docs.map(d => d.data() as PlaybackProgressItem)
+      .filter(item => Number.isFinite(item.position) && item.position >= 5 && item.position < (item.duration || Infinity) - 8));
+  }, err => handleFirestoreError(err, OperationType.LIST, `users/${userId}/playbackProgress`));
+}
+
+export async function savePlaybackProgress(userId: string, track: Track, position: number, duration: number): Promise<void> {
+  const path = `users/${userId}/playbackProgress/${track.id}`;
+  try {
+    if (!Number.isFinite(position) || position < 5) return;
+    const actualDuration = Number.isFinite(duration) && duration > 0 ? duration : track.duration;
+    if (actualDuration > 0 && position >= actualDuration - 8) {
+      await deleteDoc(doc(db, 'users', userId, 'playbackProgress', track.id));
+      return;
+    }
+    await setDoc(doc(db, 'users', userId, 'playbackProgress', track.id), {
+      id: track.id, videoId: track.id, userId,
+      title: track.title, artist: track.artist, thumbnailUrl: track.thumbnailUrl,
+      duration: actualDuration || 0, position: Math.floor(position),
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export async function clearPlaybackProgress(userId: string, trackId: string): Promise<void> {
+  const path = `users/${userId}/playbackProgress/${trackId}`;
+  try {
+    await deleteDoc(doc(db, 'users', userId, 'playbackProgress', trackId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
+}
+
+export async function saveListeningSession(
+  userId: string, sessionId: string, track: Track, secondsListened: number, startedAt: string, completed = false
+): Promise<void> {
+  const path = `users/${userId}/listeningSessions/${sessionId}`;
+  try {
+    await setDoc(doc(db, 'users', userId, 'listeningSessions', sessionId), {
+      id: sessionId, userId, videoId: track.id, title: track.title, artist: track.artist,
+      thumbnailUrl: track.thumbnailUrl, duration: track.duration || 0,
+      secondsListened: Math.min(86400, Math.max(0, Math.floor(secondsListened))),
+      startedAt, updatedAt: new Date().toISOString(), completed,
+    }, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export function subscribeListeningSessions(userId: string, onUpdate: (items: ListeningSession[]) => void): Unsubscribe {
+  const q = query(collection(db, 'users', userId, 'listeningSessions'), orderBy('updatedAt', 'desc'), limit(500));
+  return onSnapshot(q, snapshot => onUpdate(snapshot.docs.map(d => d.data() as ListeningSession)),
+    err => handleFirestoreError(err, OperationType.LIST, `users/${userId}/listeningSessions`));
 }
 
 // User Settings

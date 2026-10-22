@@ -59,6 +59,32 @@ export interface PlaybackHistoryItem {
   playedAt: string;
 }
 
+export interface PlaybackProgressItem {
+  id: string;
+  userId: string;
+  videoId: string;
+  title: string;
+  artist: string;
+  thumbnailUrl: string;
+  duration: number;
+  position: number;
+  updatedAt: string;
+}
+
+export interface ListeningSession {
+  id: string;
+  userId: string;
+  videoId: string;
+  title: string;
+  artist: string;
+  thumbnailUrl: string;
+  duration: number;
+  secondsListened: number;
+  startedAt: string;
+  updatedAt: string;
+  completed?: boolean;
+}
+
 export interface UserProfile {
   uid: string;
   email: string;
@@ -116,4 +142,5 @@ export type ViewType =
   | 'album'
   | 'playlist'
   | 'lyrics'
-  | 'settings';
+  | 'settings'
+  | 'stats';

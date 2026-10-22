@@ -45,6 +45,28 @@ service cloud.firestore {
         allow delete: if isOwner(userId);
       }
 
+      match /playbackProgress/{trackId} {
+        allow get, list: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.userId == userId
+          && request.resource.data.videoId is string
+          && request.resource.data.position is number
+          && request.resource.data.position >= 0
+          && request.resource.data.position <= 86400;
+        allow delete: if isOwner(userId);
+      }
+
+      match /listeningSessions/{sessionId} {
+        allow get, list: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.userId == userId
+          && request.resource.data.videoId is string
+          && request.resource.data.secondsListened is number
+          && request.resource.data.secondsListened >= 0
+          && request.resource.data.secondsListened <= 86400;
+        allow delete: if isOwner(userId);
+      }
+
       match /settings/{settingId} {
         allow get, list: if isOwner(userId);
         allow create, update: if isOwner(userId);

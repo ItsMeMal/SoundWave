@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Plus, Check, ChevronRight, Music, AlertCircle, RotateCcw, Clock, Sparkles } from 'lucide-react';
-import { ViewType, Track, PlaybackHistoryItem } from '../types/music.ts';
+import { ViewType, Track, PlaybackHistoryItem, PlaybackProgressItem } from '../types/music.ts';
 import { usePlayer } from '../context/PlayerContext.tsx';
 import { useAuth } from '../context/AuthContext.tsx';
-import { getGreeting } from '../utils/formatters.ts';
+import { getGreeting, formatTime } from '../utils/formatters.ts';
 import { searchMusic, getRelatedTracks } from '../services/musicApi.ts';
-import { subscribePlaybackHistory } from '../services/firebase.ts';
+import { subscribePlaybackHistory, subscribePlaybackProgress } from '../services/firebase.ts';
 import { CoverImage } from '../components/common/CoverImage.tsx';
 
 interface HomeViewProps {
@@ -15,12 +15,13 @@ interface HomeViewProps {
 
 export const HomeView: React.FC<HomeViewProps> = ({ onNavigate, onOpenCreatePlaylist }) => {
   const { user } = useAuth();
-  const { playTrack, currentTrack, isPlaying, togglePlay } = usePlayer();
+  const { playTrack, resumeTrack, currentTrack, isPlaying, togglePlay } = usePlayer();
 
   const [heroTrack, setHeroTrack] = useState<Track | null>(null);
   const [discoverTracks, setDiscoverTracks] = useState<Track[]>([]);
   const [madeForYouTracks, setMadeForYouTracks] = useState<Track[]>([]);
   const [historyItems, setHistoryItems] = useState<PlaybackHistoryItem[]>([]);
+  const [progressItems, setProgressItems] = useState<PlaybackProgressItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [savedBanner, setSavedBanner] = useState<boolean>(false);
@@ -38,6 +39,15 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate, onOpenCreatePlay
       setHistoryItems(items);
     });
     return () => unsub();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setProgressItems([]);
+      return;
+    }
+    const unsubscribe = subscribePlaybackProgress(user.uid, setProgressItems);
+    return () => unsubscribe();
   }, [user]);
 
   // Load real music catalog from Music API
@@ -245,6 +255,42 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate, onOpenCreatePlay
           </div>
         </div>
       </div>
+
+      {/* Continue Listening: progress is synced to the signed-in user's private Firestore data. */}
+      {progressItems.length > 0 && (
+        <section>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-bold text-white tracking-tight">Continue listening</h2>
+              <p className="mt-1 text-xs text-zinc-500">Pick up where you left off on any device.</p>
+            </div>
+            <span className="text-[11px] text-emerald-300 font-semibold">{progressItems.length} saved</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            {progressItems.slice(0, 6).map(item => {
+              const track: Track = { id: item.videoId || item.id, title: item.title, artist: item.artist,
+                thumbnailUrl: item.thumbnailUrl, duration: item.duration || 0, source: 'history' };
+              const percent = item.duration > 0 ? Math.min(100, Math.max(0, item.position / item.duration * 100)) : 0;
+              return (
+                <button key={item.id} type="button" onClick={() => void resumeTrack(track, item.position)}
+                  className="text-left bg-[#12161f]/60 hover:bg-[#161b26] p-3 rounded-xl border border-transparent hover:border-emerald-500/30 transition-all group min-w-0"
+                  title={`Resume ${item.title} at ${formatTime(item.position)}`}>
+                  <div className="relative aspect-square mb-3 overflow-hidden rounded-lg bg-zinc-800">
+                    <img src={item.thumbnailUrl} alt={item.title} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                    <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20">
+                      <div className="h-full bg-emerald-400" style={{ width: `${percent}%` }} />
+                    </div>
+                    <span className="absolute bottom-2 right-2 rounded-md bg-black/75 px-1.5 py-0.5 text-[10px] font-semibold text-white">{formatTime(item.position)}</span>
+                  </div>
+                  <p className="text-xs font-bold text-white truncate group-hover:text-emerald-400">{item.title}</p>
+                  <p className="mt-0.5 text-[11px] text-zinc-400 truncate">{item.artist}</p>
+                  <p className="mt-2 text-[10px] text-zinc-500">{percent > 0 ? `${Math.round(percent)}% played` : 'Resume track'}</p>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Recently Played Section (Real User History from Firestore) */}
       <section>
