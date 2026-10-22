@@ -24,11 +24,45 @@ import {
   limit, 
   Unsubscribe 
 } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
 import { Track, Playlist, LikedTrackItem, PlaybackHistoryItem, UserProfile, UserSettings } from '../types/music.ts';
 
+// Firebase Web configuration is public client configuration, supplied per deployment.
+// Keep secrets (for example, service-account keys) out of VITE_* variables.
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY?.trim(),
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN?.trim(),
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID?.trim(),
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET?.trim(),
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID?.trim(),
+  appId: import.meta.env.VITE_FIREBASE_APP_ID?.trim(),
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID?.trim() || undefined,
+};
+
+const firestoreDatabaseId = import.meta.env.VITE_FIRESTORE_DATABASE_ID?.trim();
+
+const requiredFirebaseValues: Record<string, string | undefined> = {
+  VITE_FIREBASE_API_KEY: firebaseConfig.apiKey,
+  VITE_FIREBASE_AUTH_DOMAIN: firebaseConfig.authDomain,
+  VITE_FIREBASE_PROJECT_ID: firebaseConfig.projectId,
+  VITE_FIREBASE_STORAGE_BUCKET: firebaseConfig.storageBucket,
+  VITE_FIREBASE_MESSAGING_SENDER_ID: firebaseConfig.messagingSenderId,
+  VITE_FIREBASE_APP_ID: firebaseConfig.appId,
+  VITE_FIRESTORE_DATABASE_ID: firestoreDatabaseId,
+};
+
+const missingFirebaseValues = Object.entries(requiredFirebaseValues)
+  .filter(([, value]) => !value)
+  .map(([name]) => name);
+
+if (missingFirebaseValues.length > 0) {
+  throw new Error(
+    `[SoundWave] Missing Firebase environment variables: ${missingFirebaseValues.join(', ')}. ` +
+    'Configure them in .env.local for local development or Project Settings > Environment Variables in Vercel.'
+  );
+}
+
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = getFirestore(app, firestoreDatabaseId!);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
