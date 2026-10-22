@@ -38,8 +38,8 @@
 
 <!-- GANTI: taruh screenshot/GIF asli di folder assets/ lalu ubah link di bawah -->
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://placehold.co/800x420/0a0c10/06b6d4?text=SoundWave+Preview">
-  <source media="(prefers-color-scheme: light)" srcset="https://placehold.co/800x420/ffffff/4c1d95?text=SoundWave+Preview">
+  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/ItsMeMal/SoundWave/blob/main/public/assets/aistudio/Screenshot%202026-10-22%20122459.png">
+  <source media="(prefers-color-scheme: light)" srcset="https://github.com/ItsMeMal/SoundWave/blob/main/public/assets/aistudio/Screenshot%202026-10-22%20122459.png">
   <img alt="Preview SoundWave" src="https://github.com/ItsMeMal/SoundWave/blob/main/public/assets/aistudio/Screenshot%202026-10-22%20122459.png">
 </picture>
 
