@@ -255,7 +255,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
 
     // Load verified lyrics asynchronously
-    loadLyrics(track.id);
+    loadLyrics(track);
 
     // 1. Try HTML5 Audio Stream first
     try {
@@ -310,22 +310,25 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
-  const loadLyrics = async (trackId: string) => {
+  const lyricsRequestRef = useRef(0);
+
+  const loadLyrics = async (track: Track) => {
+    const requestId = ++lyricsRequestRef.current;
     setLyricsLoading(true);
     setLyrics(null);
     try {
-      const data = await getLyrics(trackId);
-      setLyrics(data);
+      const data = await getLyrics(track.id, track);
+      if (requestId === lyricsRequestRef.current) setLyrics(data);
     } catch {
-      setLyrics(null);
+      if (requestId === lyricsRequestRef.current) setLyrics(null);
     } finally {
-      setLyricsLoading(false);
+      if (requestId === lyricsRequestRef.current) setLyricsLoading(false);
     }
   };
 
   const fetchLyricsForCurrent = async () => {
     if (currentTrack) {
-      await loadLyrics(currentTrack.id);
+      await loadLyrics(currentTrack);
     }
   };
 
