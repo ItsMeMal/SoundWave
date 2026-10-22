@@ -8,6 +8,8 @@ const APP_SHELL = [
   '/favicon.svg',
   '/pwa-192.svg',
   '/pwa-512.svg',
+  '/pwa-192.png',
+  '/pwa-512.png',
 ];
 
 self.addEventListener('install', event => {
