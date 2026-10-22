@@ -4,6 +4,8 @@ import { ViewType, Playlist } from '../types/music.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 import { usePlayer } from '../context/PlayerContext.tsx';
 import { deleteUserPlaylist } from '../services/firebase.ts';
+import { ConfirmDialog } from '../components/common/ConfirmDialog.tsx';
+import { useToast } from '../context/ToastContext.tsx';
 
 interface LibraryViewProps {
   onNavigate: (view: ViewType, payload?: any) => void;
@@ -23,15 +25,40 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const { user, openAuthModal } = useAuth();
   const { likedTracksList, playTrack } = usePlayer();
   const [activeTab, setActiveTab] = useState<LibraryTab>('Playlists');
+  const [playlistToDelete, setPlaylistToDelete] = useState<Playlist | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const { notify } = useToast();
 
   const tabs: LibraryTab[] = ['Playlists', 'Songs', 'Liked Songs'];
 
-  const handleDeletePlaylist = async (playlistId: string, e: React.MouseEvent) => {
+  const handleDeletePlaylist = (playlist: Playlist, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!user) return;
-    if (confirm('Are you sure you want to delete this playlist?')) {
-      await deleteUserPlaylist(user.uid, playlistId);
+    if (!user || isDeleting) return;
+    setPlaylistToDelete(playlist);
+  };
+
+  const confirmDeletePlaylist = async () => {
+    if (!user || !playlistToDelete || isDeleting) return;
+
+    setIsDeleting(true);
+    try {
+      await deleteUserPlaylist(user.uid, playlistToDelete.id);
+      const deletedName = playlistToDelete.name;
+      setPlaylistToDelete(null);
       onRefreshPlaylists();
+      notify({
+        variant: 'success',
+        title: 'Playlist deleted',
+        description: `“${deletedName}” was removed from your library.`,
+      });
+    } catch (error) {
+      notify({
+        variant: 'error',
+        title: 'Could not delete playlist',
+        description: error instanceof Error ? error.message : 'Something went wrong. Please try again.',
+      });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -115,7 +142,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                     </div>
 
                     <button
-                      onClick={(e) => handleDeletePlaylist(pl.id, e)}
+                      onClick={(e) => handleDeletePlaylist(pl, e)}
                       className="opacity-0 group-hover:opacity-100 p-1 text-zinc-500 hover:text-rose-400 transition-opacity"
                       aria-label="Delete playlist"
                     >
@@ -176,5 +203,16 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         </div>
       )}
     </div>
+      <ConfirmDialog
+        isOpen={playlistToDelete !== null}
+        title={`Delete “${playlistToDelete?.name || 'playlist'}”?`}
+        description="This permanently removes the playlist from your library. This action can’t be undone."
+        confirmLabel="Delete playlist"
+        isLoading={isDeleting}
+        onConfirm={confirmDeletePlaylist}
+        onCancel={() => {
+          if (!isDeleting) setPlaylistToDelete(null);
+        }}
+      />
   );
 };
