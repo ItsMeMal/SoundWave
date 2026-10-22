@@ -248,11 +248,14 @@ export const RightPlayerPanel: React.FC<RightPlayerPanelProps> = ({
             {/* Controls (Shuffle, Prev, Play/Pause, Next, Repeat) */}
             <div className="mt-3 flex items-center justify-between px-2">
               <button
+                type="button"
                 onClick={toggleShuffle}
+                title={isShuffle ? 'Shuffle on' : 'Shuffle off'}
                 className={`p-2 transition-colors relative ${
                   isShuffle ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'
                 }`}
-                aria-label="Toggle Shuffle"
+                aria-label={isShuffle ? 'Disable shuffle' : 'Enable shuffle'}
+                aria-pressed={isShuffle}
               >
                 <Shuffle className="w-4 h-4" />
                 {isShuffle && <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 bg-emerald-400 rounded-full" />}
@@ -288,11 +291,14 @@ export const RightPlayerPanel: React.FC<RightPlayerPanelProps> = ({
               </button>
 
               <button
+                type="button"
                 onClick={cycleRepeat}
+                title={repeatMode === 'off' ? 'Repeat off' : repeatMode === 'all' ? 'Repeat playlist' : 'Repeat current track'}
                 className={`p-2 transition-colors relative ${
                   repeatMode !== 'off' ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'
                 }`}
-                aria-label="Toggle Repeat"
+                aria-label={`Repeat mode: ${repeatMode}. Activate to change mode.`}
+                aria-pressed={repeatMode !== 'off'}
               >
                 {repeatMode === 'one' ? (
                   <Repeat1 className="w-4 h-4" />
