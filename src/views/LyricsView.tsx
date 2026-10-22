@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { ArrowLeft, Music, Loader2, AlertCircle, RotateCcw, Volume2, Sparkles } from 'lucide-react';
+import { ArrowLeft, Music, Loader2, AlertCircle, RotateCcw, Sparkles } from 'lucide-react';
 import { ViewType } from '../types/music.ts';
 import { usePlayer } from '../context/PlayerContext.tsx';
 import { parseLyrics } from '../utils/formatters.ts';
@@ -10,7 +10,7 @@ interface LyricsViewProps {
 
 export const LyricsView: React.FC<LyricsViewProps> = ({ onNavigate }) => {
   const { currentTrack, currentTime, lyrics, lyricsLoading, fetchLyricsForCurrent, seek } = usePlayer();
-  const activeLineRef = useRef<HTMLParagraphElement>(null);
+  const activeLineRef = useRef<HTMLButtonElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [userScrolled, setUserScrolled] = useState(false);
 
