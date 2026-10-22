@@ -93,6 +93,15 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // YouTube's iframe callbacks are created once; refs keep them connected to current React state.
   const handleTrackEndedRef = useRef<() => void>(() => {});
   const nextTrackRef = useRef<() => Promise<void>>(async () => {});
+  const mediaActionsRef = useRef({
+    play: () => {},
+    pause: () => {},
+    next: () => {},
+    previous: () => {},
+    seek: (_time: number) => {},
+    getPosition: () => 0,
+    getDuration: () => 0,
+  });
 
   // Subscribe to Liked tracks with realtime onSnapshot when user is authenticated
   useEffect(() => {
@@ -211,6 +220,96 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [isPlaying, duration]);
+
+  // Expose the current song and remote media controls to the OS lock screen/media notification.
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+
+    const session = navigator.mediaSession;
+    const handlers: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
+      ['play', () => mediaActionsRef.current.play()],
+      ['pause', () => mediaActionsRef.current.pause()],
+      ['previoustrack', () => mediaActionsRef.current.previous()],
+      ['nexttrack', () => mediaActionsRef.current.next()],
+      ['seekbackward', details => {
+        const offset = details.seekOffset ?? 10;
+        mediaActionsRef.current.seek(Math.max(0, mediaActionsRef.current.getPosition() - offset));
+      }],
+      ['seekforward', details => {
+        const duration = mediaActionsRef.current.getDuration();
+        const target = mediaActionsRef.current.getPosition() + (details.seekOffset ?? 10);
+        mediaActionsRef.current.seek(duration > 0 ? Math.min(duration, target) : target);
+      }],
+      ['seekto', details => {
+        if (typeof details.seekTime === 'number') {
+          mediaActionsRef.current.seek(details.seekTime);
+        }
+      }],
+    ];
+
+    const registered: MediaSessionAction[] = [];
+    for (const [action, handler] of handlers) {
+      try {
+        session.setActionHandler(action, handler);
+        registered.push(action);
+      } catch {
+        // Some browsers/devices don't support every media action.
+      }
+    }
+
+    return () => {
+      for (const action of registered) {
+        try {
+          session.setActionHandler(action, null);
+        } catch {
+          // Ignore unsupported cleanup actions.
+        }
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+
+    const session = navigator.mediaSession;
+    if (!currentTrack) {
+      session.metadata = null;
+      session.playbackState = 'none';
+      return;
+    }
+
+    if (typeof MediaMetadata !== 'undefined') {
+      try {
+        session.metadata = new MediaMetadata({
+          title: currentTrack.title,
+          artist: currentTrack.artist,
+          album: currentTrack.album || 'SoundWave',
+          artwork: currentTrack.thumbnailUrl ? [{ src: currentTrack.thumbnailUrl }] : [],
+        });
+      } catch (error) {
+        console.warn('[SoundWave] Could not set media metadata:', error);
+      }
+    }
+  }, [currentTrack]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = !currentTrack ? 'none' : isPlaying ? 'playing' : 'paused';
+  }, [currentTrack, isPlaying]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || duration <= 0) return;
+
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: 1,
+        position: Math.max(0, Math.min(currentTime, duration)),
+      });
+    } catch {
+      // Position state is optional and may be unavailable in some browsers.
+    }
+  }, [currentTime, duration]);
 
   // Real track playback
   const playTrack = async (track: Track, newQueue?: Track[]) => {
@@ -573,6 +672,21 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const isLiked = (trackId: string): boolean => {
     return likedTrackIds.has(trackId);
+  };
+
+  // Media-session handlers always call current actions, even after React state changes.
+  mediaActionsRef.current = {
+    play: () => {
+      if (!isPlaying) togglePlay();
+    },
+    pause: () => {
+      if (isPlaying) togglePlay();
+    },
+    next: () => { void nextTrack(); },
+    previous: () => prevTrack(),
+    seek: (time: number) => seek(time),
+    getPosition: () => currentTime,
+    getDuration: () => duration,
   };
 
   return (
