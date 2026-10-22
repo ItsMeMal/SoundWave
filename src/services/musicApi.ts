@@ -22,9 +22,9 @@ function cacheClientResponse(key: string, data: unknown): void {
 }
 
 async function fetchProxy(endpoint: string, options: RequestInit = {}): Promise<Response> {
-  const cleanPath = endpoint.startsWith('/') ? endpoint : \`/\${endpoint}\`;
-  const fullApiPath = cleanPath.startsWith('/api') ? cleanPath : \`/api\${cleanPath}\`;
-  const proxyUrl = \`\${API_PREFIX}\${fullApiPath}\`;
+  const cleanPath = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const fullApiPath = cleanPath.startsWith('/api') ? cleanPath : `/api${cleanPath}`;
+  const proxyUrl = `${API_PREFIX}${fullApiPath}`;
   const isGet = !options.method || options.method.toUpperCase() === 'GET';
   const cacheTtl = clientCacheTtlMs(proxyUrl);
 
