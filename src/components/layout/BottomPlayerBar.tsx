@@ -16,6 +16,7 @@ import {
 import { usePlayer } from '../../context/PlayerContext.tsx';
 import { formatTime } from '../../utils/formatters.ts';
 import { ViewType } from '../../types/music.ts';
+import { SleepTimerControl } from '../common/SleepTimerControl.tsx';
 
 interface BottomPlayerBarProps {
   onNavigate: (view: ViewType, payload?: any) => void;
@@ -259,6 +260,8 @@ export const BottomPlayerBar: React.FC<BottomPlayerBarProps> = ({ onNavigate, cl
                 {repeatMode !== 'off' && <span className="absolute bottom-0.5 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-emerald-400" />}
               </button>
             </div>
+
+            <SleepTimerControl className="mt-5" />
 
             {/* Volume */}
             <div className="mt-8 flex items-center gap-3">
