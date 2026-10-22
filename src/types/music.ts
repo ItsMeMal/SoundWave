@@ -33,6 +33,7 @@ export interface Playlist {
   creator?: string;
   createdAt?: string;
   updatedAt?: string;
+  shareId?: string;
 }
 
 export interface LikedTrackItem {

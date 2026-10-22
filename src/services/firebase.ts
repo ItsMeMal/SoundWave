@@ -15,7 +15,9 @@ import {
   doc, 
   getDoc, 
   setDoc, 
-  deleteDoc, 
+  deleteDoc,
+  deleteField,
+  writeBatch, 
   collection, 
   getDocs, 
   onSnapshot, 
@@ -203,25 +205,144 @@ export async function createFirestorePlaylist(
   }
 }
 
+// Public sharing stores a minimal snapshot under a high-entropy unlisted token.
+// Provider stream URLs and bulky search metadata are intentionally not copied to public documents.
+function toShareableTracks(tracks: Track[]): Track[] {
+  return tracks.slice(0, 500).filter(Boolean).map(track => ({
+    id: String(track.id || ''),
+    title: String(track.title || 'Unknown track'),
+    artist: String(track.artist || 'Unknown artist'),
+    album: String(track.album || ''),
+    thumbnailUrl: String(track.thumbnailUrl || ''),
+    duration: Number.isFinite(track.duration) ? Math.max(0, track.duration) : 0,
+  }));
+}
+
+function createShareToken(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+  return Array.from({ length: 48 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+}
+
+export async function createOrUpdateSharedPlaylist(
+  userId: string,
+  playlistId: string,
+  creatorName: string
+): Promise<string> {
+  const playlistRef = doc(db, 'users', userId, 'playlists', playlistId);
+  const snap = await getDoc(playlistRef);
+  if (!snap.exists()) throw new Error('This playlist no longer exists.');
+  const playlist = snap.data() as Playlist;
+  if (playlist.userId !== userId) throw new Error('Only the playlist owner can create a share link.');
+
+  const shareId = typeof playlist.shareId === 'string' && playlist.shareId
+    ? playlist.shareId
+    : createShareToken();
+  const publicTracks = toShareableTracks(playlist.tracks || []);
+  const now = new Date().toISOString();
+  const shareRef = doc(db, 'sharedPlaylists', shareId);
+  const batch = writeBatch(db);
+
+  batch.set(shareRef, {
+    id: playlist.id,
+    playlistId: playlist.id,
+    shareId,
+    ownerId: userId,
+    name: String(playlist.name || 'Shared playlist'),
+    description: String(playlist.description || ''),
+    coverUrl: String(playlist.coverUrl || publicTracks[0]?.thumbnailUrl || ''),
+    creator: String(creatorName || 'SoundWave listener'),
+    trackCount: publicTracks.length,
+    tracks: publicTracks,
+    isPublic: true,
+    createdAt: String(playlist.createdAt || now),
+    updatedAt: now,
+  });
+  batch.set(playlistRef, { shareId, updatedAt: now }, { merge: true });
+  await batch.commit();
+  return shareId;
+}
+
+export async function getSharedPlaylist(shareId: string): Promise<Playlist | null> {
+  if (!/^[a-fA-F0-9]{32,80}$/.test(shareId)) return null;
+  const snap = await getDoc(doc(db, 'sharedPlaylists', shareId));
+  if (!snap.exists()) return null;
+  const data = snap.data();
+  if (data.isPublic !== true || !Array.isArray(data.tracks)) return null;
+
+  const tracks = toShareableTracks(data.tracks as Track[]).filter(track => track.id && track.title);
+  return {
+    id: String(data.playlistId || data.id || shareId),
+    name: String(data.name || 'Shared playlist'),
+    description: String(data.description || ''),
+    coverUrl: String(data.coverUrl || tracks[0]?.thumbnailUrl || ''),
+    trackCount: tracks.length,
+    tracks,
+    creator: String(data.creator || 'SoundWave listener'),
+    createdAt: typeof data.createdAt === 'string' ? data.createdAt : undefined,
+    updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : undefined,
+  };
+}
+
+export async function revokeSharedPlaylistLink(userId: string, playlistId: string): Promise<void> {
+  const playlistRef = doc(db, 'users', userId, 'playlists', playlistId);
+  const snap = await getDoc(playlistRef);
+  if (!snap.exists()) throw new Error('This playlist no longer exists.');
+  const playlist = snap.data() as Playlist;
+  if (playlist.userId !== userId) throw new Error('Only the playlist owner can disable sharing.');
+  if (!playlist.shareId) return;
+
+  const batch = writeBatch(db);
+  const shareRef = doc(db, 'sharedPlaylists', playlist.shareId);
+  const shareSnap = await getDoc(shareRef);
+  if (shareSnap.exists() && shareSnap.data().ownerId === userId) batch.delete(shareRef);
+  batch.set(playlistRef, { shareId: deleteField(), updatedAt: new Date().toISOString() }, { merge: true });
+  await batch.commit();
+}
+
 export async function addTrackToUserPlaylist(userId: string, playlistId: string, track: Track): Promise<void> {
   const path = `users/${userId}/playlists/${playlistId}`;
   try {
     const playlistRef = doc(db, 'users', userId, 'playlists', playlistId);
     const snap = await getDoc(playlistRef);
-    if (snap.exists()) {
-      const data = snap.data() as Playlist;
-      const exists = data.tracks?.some(t => t.id === track.id);
-      if (!exists) {
-        const updatedTracks = [...(data.tracks || []), track];
-        await setDoc(playlistRef, {
-          tracks: updatedTracks,
-          trackCount: updatedTracks.length,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
+    if (!snap.exists()) return;
+
+    const data = snap.data() as Playlist;
+    if (data.userId !== userId) throw new Error('Only the playlist owner can edit this playlist.');
+    if ((data.tracks || []).some(existing => existing.id === track.id)) return;
+
+    const updatedTracks = [...(data.tracks || []), track];
+    const now = new Date().toISOString();
+    const playlistUpdate: Record<string, any> = {
+      tracks: updatedTracks,
+      trackCount: updatedTracks.length,
+      updatedAt: now,
+    };
+    const batch = writeBatch(db);
+    let sharedRef: ReturnType<typeof doc> | null = null;
+
+    if (data.shareId) {
+      const candidateRef = doc(db, 'sharedPlaylists', data.shareId);
+      const sharedSnap = await getDoc(candidateRef);
+      if (sharedSnap.exists() && sharedSnap.data().ownerId === userId && sharedSnap.data().isPublic === true) {
+        sharedRef = candidateRef;
+      } else {
+        playlistUpdate.shareId = deleteField();
       }
     }
+
+    batch.set(playlistRef, playlistUpdate, { merge: true });
+    if (sharedRef) {
+      const publicTracks = toShareableTracks(updatedTracks);
+      batch.set(sharedRef, { tracks: publicTracks, trackCount: publicTracks.length, updatedAt: now }, { merge: true });
+    }
+    await batch.commit();
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);
+    throw err;
   }
 }
 
@@ -230,24 +351,61 @@ export async function removeTrackFromUserPlaylist(userId: string, playlistId: st
   try {
     const playlistRef = doc(db, 'users', userId, 'playlists', playlistId);
     const snap = await getDoc(playlistRef);
-    if (snap.exists()) {
-      const data = snap.data() as Playlist;
-      const updatedTracks = (data.tracks || []).filter(t => t.id !== trackId);
-      await setDoc(playlistRef, {
-        tracks: updatedTracks,
-        trackCount: updatedTracks.length,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
+    if (!snap.exists()) return;
+
+    const data = snap.data() as Playlist;
+    if (data.userId !== userId) throw new Error('Only the playlist owner can edit this playlist.');
+
+    const updatedTracks = (data.tracks || []).filter(track => track.id !== trackId);
+    const now = new Date().toISOString();
+    const playlistUpdate: Record<string, any> = {
+      tracks: updatedTracks,
+      trackCount: updatedTracks.length,
+      updatedAt: now,
+    };
+    const batch = writeBatch(db);
+    let sharedRef: ReturnType<typeof doc> | null = null;
+
+    if (data.shareId) {
+      const candidateRef = doc(db, 'sharedPlaylists', data.shareId);
+      const sharedSnap = await getDoc(candidateRef);
+      if (sharedSnap.exists() && sharedSnap.data().ownerId === userId && sharedSnap.data().isPublic === true) {
+        sharedRef = candidateRef;
+      } else {
+        playlistUpdate.shareId = deleteField();
+      }
     }
+
+    batch.set(playlistRef, playlistUpdate, { merge: true });
+    if (sharedRef) {
+      const publicTracks = toShareableTracks(updatedTracks);
+      batch.set(sharedRef, { tracks: publicTracks, trackCount: publicTracks.length, updatedAt: now }, { merge: true });
+    }
+    await batch.commit();
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);
+    throw err;
   }
 }
 
 export async function deleteUserPlaylist(userId: string, playlistId: string): Promise<void> {
   const path = `users/${userId}/playlists/${playlistId}`;
   try {
-    await deleteDoc(doc(db, 'users', userId, 'playlists', playlistId));
+    const playlistRef = doc(db, 'users', userId, 'playlists', playlistId);
+    const snap = await getDoc(playlistRef);
+    if (!snap.exists()) return;
+
+    const data = snap.data() as Playlist;
+    if (data.userId !== userId) throw new Error('Only the playlist owner can delete this playlist.');
+
+    const batch = writeBatch(db);
+    if (data.shareId) {
+      const shareRef = doc(db, 'sharedPlaylists', data.shareId);
+      const shareSnap = await getDoc(shareRef);
+      if (shareSnap.exists() && shareSnap.data().ownerId === userId) batch.delete(shareRef);
+    }
+    batch.delete(playlistRef);
+    await batch.commit();
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, path);
     throw err;

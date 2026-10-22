@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext.tsx';
 import { PlayerProvider } from './context/PlayerContext.tsx';
 import { ViewType, Playlist, Track } from './types/music.ts';
-import { subscribeUserPlaylists } from './services/firebase.ts';
+import { subscribeUserPlaylists, getSharedPlaylist } from './services/firebase.ts';
 
 // Layout Components
 import { Sidebar } from './components/layout/Sidebar.tsx';
@@ -26,11 +26,12 @@ import { SettingsView } from './views/SettingsView.tsx';
 import { AuthModal } from './components/modals/AuthModal.tsx';
 import { CreatePlaylistModal } from './components/modals/CreatePlaylistModal.tsx';
 import { AddToPlaylistModal } from './components/modals/AddToPlaylistModal.tsx';
-import { ToastProvider } from './context/ToastContext.tsx';
+import { ToastProvider, useToast } from './context/ToastContext.tsx';
 import { PWAInstallPrompt } from './components/common/PWAInstallPrompt.tsx';
 
 const AppContent: React.FC = () => {
   const { user } = useAuth();
+  const { notify } = useToast();
 
   // Navigation State
   const [currentView, setCurrentView] = useState<ViewType>('home');
@@ -62,6 +63,62 @@ const AppContent: React.FC = () => {
 
     return () => unsubscribe();
   }, [user, refreshCounter]);
+
+  // Resolve unlisted public share links without requiring the recipient to sign in.
+  useEffect(() => {
+    const initialUrl = new URL(window.location.href);
+    const shareId = initialUrl.searchParams.get('share');
+    if (!shareId) return;
+
+    let cancelled = false;
+    setCurrentView('playlist');
+    setNavPayload({ playlistId: '', name: 'Shared playlist', isShared: true, shareLoading: true });
+
+    const cleanInvalidShareParam = () => {
+      const invalidUrl = new URL(window.location.href);
+      invalidUrl.searchParams.delete('share');
+      window.history.replaceState({}, '', `${invalidUrl.pathname}${invalidUrl.search}${invalidUrl.hash}`);
+    };
+
+    void getSharedPlaylist(shareId).then(sharedPlaylist => {
+      if (cancelled) return;
+      if (!sharedPlaylist) {
+        setCurrentView('home');
+        setNavPayload({});
+        cleanInvalidShareParam();
+        notify({
+          variant: 'error',
+          title: 'Shared playlist unavailable',
+          description: 'The link may be invalid or its owner has disabled sharing.',
+        });
+        return;
+      }
+
+      setNavPayload({
+        playlistId: sharedPlaylist.id,
+        initialPlaylist: sharedPlaylist,
+        name: sharedPlaylist.name,
+        isShared: true,
+        shareLoading: false,
+      });
+      setCurrentView('playlist');
+    }).catch(error => {
+      if (cancelled) return;
+      setCurrentView('home');
+      setNavPayload({});
+      cleanInvalidShareParam();
+      notify({
+        variant: 'error',
+        title: 'Could not open shared playlist',
+        description: 'Check the link and make sure the updated Firestore sharing rules have been published.',
+      });
+      console.warn('[SoundWave] Shared playlist load failed:', error);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [notify]);
 
   const handleNavigate = (view: ViewType, payload?: any) => {
     setCurrentView(view);
@@ -193,6 +250,8 @@ const AppContent: React.FC = () => {
                 playlistId={navPayload.playlistId || ''}
                 initialPlaylist={navPayload.initialPlaylist}
                 name={navPayload.name}
+                isShared={Boolean(navPayload.isShared)}
+                shareLoading={Boolean(navPayload.shareLoading)}
                 onNavigate={handleNavigate}
                 onRefreshPlaylists={() => setRefreshCounter(prev => prev + 1)}
               />

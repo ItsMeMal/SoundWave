@@ -51,5 +51,28 @@ service cloud.firestore {
         allow delete: if false;
       }
     }
+    match /sharedPlaylists/{shareId} {
+      // Unlisted share tokens allow direct document reads only, never collection listing.
+      allow get: if resource.data.isPublic == true;
+      allow list: if false;
+
+      allow create: if isOwner(request.resource.data.ownerId)
+        && request.resource.data.shareId == shareId
+        && request.resource.data.playlistId is string
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.tracks is list
+        && request.resource.data.tracks.size() <= 500
+        && request.resource.data.isPublic == true;
+
+      allow update: if isOwner(resource.data.ownerId)
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.shareId == shareId
+        && request.resource.data.tracks is list
+        && request.resource.data.tracks.size() <= 500
+        && request.resource.data.isPublic == true;
+
+      allow delete: if isOwner(resource.data.ownerId);
+    }
   }
 }

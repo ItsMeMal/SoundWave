@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Play, Pause, Heart, Clock, Trash2, Plus, Music, Loader2, AlertCircle, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Play, Pause, Heart, Clock, Trash2, Plus, Music, Loader2, AlertCircle, RotateCcw, Share2 } from 'lucide-react';
 import { ViewType, Playlist, Track } from '../types/music.ts';
 import { usePlayer } from '../context/PlayerContext.tsx';
 import { formatTime } from '../utils/formatters.ts';
 import { getBrowsePlaylist, searchMusic } from '../services/musicApi.ts';
 import { removeTrackFromUserPlaylist } from '../services/firebase.ts';
 import { useAuth } from '../context/AuthContext.tsx';
+import { SharePlaylistModal } from '../components/modals/SharePlaylistModal.tsx';
 
 interface PlaylistViewProps {
   playlistId: string;
@@ -13,6 +14,8 @@ interface PlaylistViewProps {
   name?: string;
   onNavigate: (view: ViewType, payload?: any) => void;
   onRefreshPlaylists: () => void;
+  isShared?: boolean;
+  shareLoading?: boolean;
 }
 
 export const PlaylistView: React.FC<PlaylistViewProps> = ({
@@ -20,19 +23,35 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
   initialPlaylist,
   name,
   onNavigate,
-  onRefreshPlaylists
+  onRefreshPlaylists,
+  isShared = false,
+  shareLoading = false,
 }) => {
   const { user } = useAuth();
   const { playTrack, currentTrack, isPlaying, togglePlay, toggleLike, isLiked } = usePlayer();
   const [playlist, setPlaylist] = useState<Playlist | null>(initialPlaylist || null);
   const [loading, setLoading] = useState(!initialPlaylist);
   const [error, setError] = useState<string | null>(null);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const isOwnedPlaylist = !isShared && Boolean(user && playlist?.userId === user.uid);
 
   const loadPlaylist = async () => {
+    if (isShared && shareLoading) {
+      setLoading(true);
+      return;
+    }
+
     if (initialPlaylist && initialPlaylist.tracks) {
       setPlaylist(initialPlaylist);
       setLoading(false);
       setError(null);
+      return;
+    }
+
+    if (isShared) {
+      setPlaylist(null);
+      setError('This shared playlist is unavailable or its owner disabled the link.');
+      setLoading(false);
       return;
     }
 
@@ -76,7 +95,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
 
   useEffect(() => {
     loadPlaylist();
-  }, [playlistId, name, initialPlaylist]);
+  }, [playlistId, name, initialPlaylist, isShared, shareLoading]);
 
   const tracks = playlist?.tracks || [];
 
@@ -88,7 +107,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
 
   const handleRemoveTrack = async (trackId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!user || !playlist) return;
+    if (!user || !playlist || isShared) return;
     await removeTrackFromUserPlaylist(user.uid, playlist.id, trackId);
     setPlaylist(prev => prev ? {
       ...prev,
@@ -119,7 +138,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
 
           <div className="text-center md:text-left flex-1 min-w-0">
             <span className="text-xs font-bold uppercase tracking-widest text-emerald-400">
-              Playlist
+              {isShared ? 'Shared playlist' : 'Playlist'}
             </span>
             <h1 className="text-2xl md:text-4xl font-extrabold text-white mt-1 tracking-tight font-['Plus_Jakarta_Sans']">
               {playlist?.name || name || 'Playlist'}
@@ -133,15 +152,27 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
               By <span className="text-zinc-300 font-medium">{playlist?.creator || user?.displayName || 'SoundWave'}</span> • {tracks.length} songs
             </p>
 
-            {tracks.length > 0 && (
-              <div className="mt-5 flex items-center justify-center md:justify-start gap-3">
-                <button
-                  onClick={handlePlayAll}
-                  className="px-6 py-2.5 rounded-full bg-emerald-400 hover:bg-emerald-300 text-black font-bold text-sm flex items-center gap-2 shadow-lg transition-transform active:scale-95"
-                >
-                  <Play className="w-4 h-4 fill-black" />
-                  <span>Play</span>
-                </button>
+            {(tracks.length > 0 || isOwnedPlaylist) && (
+              <div className="mt-5 flex flex-wrap items-center justify-center md:justify-start gap-3">
+                {tracks.length > 0 && (
+                  <button
+                    onClick={handlePlayAll}
+                    className="px-6 py-2.5 rounded-full bg-emerald-400 hover:bg-emerald-300 text-black font-bold text-sm flex items-center gap-2 shadow-lg transition-transform active:scale-95"
+                  >
+                    <Play className="w-4 h-4 fill-black" />
+                    <span>Play</span>
+                  </button>
+                )}
+                {isOwnedPlaylist && (
+                  <button
+                    type="button"
+                    onClick={() => setShareDialogOpen(true)}
+                    className="px-5 py-2.5 rounded-full border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-white font-semibold text-sm flex items-center gap-2 transition-colors"
+                  >
+                    <Share2 className="w-4 h-4 text-emerald-300" />
+                    <span>{playlist?.shareId ? 'Share link' : 'Share playlist'}</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -225,7 +256,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
                     >
                       <Heart className={`w-4 h-4 ${liked ? 'text-emerald-400 fill-emerald-400' : ''}`} />
                     </button>
-                    {playlist?.userId === user?.uid && (
+                    {!isShared && playlist?.userId === user?.uid && (
                       <button
                         onClick={(e) => handleRemoveTrack(track.id, e)}
                         className="text-zinc-500 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -250,5 +281,14 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
         )}
       </div>
     </div>
+      <SharePlaylistModal
+        isOpen={shareDialogOpen}
+        playlist={playlist}
+        onClose={() => setShareDialogOpen(false)}
+        onShareChange={(shareId) => {
+          setPlaylist(current => current ? { ...current, shareId } : current);
+          onRefreshPlaylists();
+        }}
+      />
   );
 };
