@@ -37,7 +37,7 @@
 </p>
 
 <img
-  src="https://raw.githubusercontent.com/ItsMeMal/SoundWave/main/public/assets/aistudio/Screenshot%202026-10-22%20122459.png"
+  src="https://raw.githubusercontent.com/ItsMeMal/SoundWave/main/soundwave-home.png"
   alt="Preview antarmuka SoundWave"
   width="800"
 />
