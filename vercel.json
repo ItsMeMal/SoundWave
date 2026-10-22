@@ -27,11 +27,15 @@
     }
   ],
   "functions": {
-    "api/music/[...path].ts": {
-      "maxDuration": 10
+    "api/music-proxy.ts": {
+      "maxDuration": 15
     }
   },
   "rewrites": [
+    {
+      "source": "/api/music/:path*",
+      "destination": "/api/music-proxy?path=:path*"
+    },
     {
       "source": "/(.*)",
       "destination": "/index.html"
