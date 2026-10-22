@@ -436,6 +436,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setSleepTimerEndAt(null);
       setSleepTimerRemainingSeconds(null);
       setSleepTimerEndOfTrack(false);
+      persistCurrentProgress();
+      writeActiveSession('pause');
 
       if (isUsingYtRef.current && ytPlayerRef.current?.pauseVideo) {
         ytPlayerRef.current.pauseVideo();
@@ -768,6 +770,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
 
     if (isPlaying) {
+      persistCurrentProgress();
+      writeActiveSession('pause');
       if (isUsingYtRef.current && ytPlayerRef.current?.pauseVideo) {
         ytPlayerRef.current.pauseVideo();
       } else if (audioRef.current) {
