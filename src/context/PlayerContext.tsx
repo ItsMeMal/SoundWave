@@ -458,7 +458,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setShuffledIndices(shuffleOrder);
     }
 
-    const nextIdx = getNextTrackIndex(queueIndex, queue.length, repeatMode, isShuffle, shuffleOrder);
+    const nextIdx = getNextTrackIndex(queueIndex, queue.length, repeatMode === 'one' ? 'off' : repeatMode, isShuffle, shuffleOrder);
     if (nextIdx !== null && queue[nextIdx]) {
       setQueueIndex(nextIdx);
       await playTrack(queue[nextIdx]);
@@ -493,28 +493,25 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     if (!isShuffle || queue.length === 0) return;
 
-    setShuffledIndices(previous => {
-      const seen = new Set<number>();
-      const valid = previous.filter(index => {
-        if (!Number.isInteger(index) || index < 0 || index >= queue.length || seen.has(index)) return false;
-        seen.add(index);
-        return true;
-      });
-      const missing = Array.from({ length: queue.length }, (_, index) => index)
-        .filter(index => !seen.has(index));
-
-      for (let i = missing.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [missing[i], missing[j]] = [missing[j], missing[i]];
-      }
-
-      const next = [...valid, ...missing];
-      if (next.length === previous.length && next.every((value, index) => value === previous[index])) {
-        return previous;
-      }
-      return next;
+    const seen = new Set<number>();
+    const valid = shuffledIndices.filter(index => {
+      if (!Number.isInteger(index) || index < 0 || index >= queue.length || seen.has(index)) return false;
+      seen.add(index);
+      return true;
     });
-  }, [queue.length, isShuffle]);
+    const missing = Array.from({ length: queue.length }, (_, index) => index)
+      .filter(index => !seen.has(index));
+
+    for (let i = missing.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [missing[i], missing[j]] = [missing[j], missing[i]];
+    }
+
+    const next = [...valid, ...missing];
+    if (next.length !== shuffledIndices.length || next.some((value, index) => value !== shuffledIndices[index])) {
+      setShuffledIndices(next);
+    }
+  }, [queue.length, isShuffle, shuffledIndices]);
 
   const prevTrack = () => {
     if (queue.length === 0) return;
@@ -548,9 +545,11 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (currentTrack) {
       setQueue([currentTrack]);
       setQueueIndex(0);
+      setShuffledIndices(isShuffle ? [0] : []);
     } else {
       setQueue([]);
       setQueueIndex(0);
+      setShuffledIndices([]);
     }
   };
 
