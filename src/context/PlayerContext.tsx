@@ -732,6 +732,17 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     >
       <audio
         ref={audioRef}
+        onPlay={() => {
+          if (!isUsingYtRef.current) {
+            setIsPlaying(true);
+            setStreamError(null);
+          }
+        }}
+        onPause={() => {
+          if (!isUsingYtRef.current && !audioRef.current?.ended) {
+            setIsPlaying(false);
+          }
+        }}
         onEnded={handleTrackEnded}
         onError={() => {
           if (currentTrack && !isUsingYtRef.current && ytPlayerRef.current?.loadVideoById) {
