@@ -250,6 +250,7 @@ export async function deleteUserPlaylist(userId: string, playlistId: string): Pr
     await deleteDoc(doc(db, 'users', userId, 'playlists', playlistId));
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, path);
+    throw err;
   }
 }
 
