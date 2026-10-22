@@ -90,6 +90,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const ytContainerRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<any>(null);
   const isUsingYtRef = useRef<boolean>(false);
+  // YouTube's iframe callbacks are created once; refs keep them connected to current React state.
+  const handleTrackEndedRef = useRef<() => void>(() => {});
+  const nextTrackRef = useRef<() => Promise<void>>(async () => {});
 
   // Subscribe to Liked tracks with realtime onSnapshot when user is authenticated
   useEffect(() => {
@@ -152,14 +155,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 } else if (event.data === 2) { // PAUSED
                   setIsPlaying(false);
                 } else if (event.data === 0) { // ENDED
-                  handleTrackEnded();
+                  handleTrackEndedRef.current();
                 }
               },
               onError: (err: any) => {
                 console.warn('YT Player notice:', err);
                 setIsStreamLoading(false);
                 setStreamError('Unable to stream this track. Skipping to next...');
-                setTimeout(() => nextTrack(), 2000);
+                setTimeout(() => { void nextTrackRef.current(); }, 2000);
               }
             }
           });
@@ -334,11 +337,31 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const handleTrackEnded = () => {
     if (repeatMode === 'one') {
-      seek(0);
-      togglePlay();
+      setCurrentTime(0);
+      setIsStreamLoading(false);
+      setStreamError(null);
+
+      if (isUsingYtRef.current && ytPlayerRef.current?.seekTo && ytPlayerRef.current?.playVideo) {
+        ytPlayerRef.current.seekTo(0, true);
+        ytPlayerRef.current.playVideo();
+        setIsPlaying(true);
+      } else if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+        void audioRef.current.play().then(() => {
+          setIsPlaying(true);
+        }).catch(() => {
+          setIsPlaying(false);
+        });
+      } else {
+        setIsPlaying(false);
+      }
       return;
     }
-    nextTrack();
+
+    // Keep the finished position visible if no next track is available.
+    setCurrentTime(previous => duration > 0 ? duration : previous);
+    setIsPlaying(false);
+    void nextTrack();
   };
 
   const togglePlay = () => {
@@ -416,8 +439,26 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const nextTrack = async () => {
-    if (queue.length === 0) return;
-    const nextIdx = getNextTrackIndex(queueIndex, queue.length, repeatMode, isShuffle, shuffledIndices);
+    if (queue.length === 0) {
+      setIsPlaying(false);
+      return;
+    }
+
+    // If the queue grew while shuffle was enabled, rebuild a complete valid order
+    // instead of silently falling back to sequential playback.
+    const validShuffleOrder =
+      shuffledIndices.length === queue.length &&
+      new Set(shuffledIndices).size === queue.length &&
+      shuffledIndices.every(index => Number.isInteger(index) && index >= 0 && index < queue.length);
+    const shuffleOrder = isShuffle && !validShuffleOrder
+      ? createShuffleIndices(queue.length, queueIndex)
+      : shuffledIndices;
+
+    if (isShuffle && !validShuffleOrder) {
+      setShuffledIndices(shuffleOrder);
+    }
+
+    const nextIdx = getNextTrackIndex(queueIndex, queue.length, repeatMode, isShuffle, shuffleOrder);
     if (nextIdx !== null && queue[nextIdx]) {
       setQueueIndex(nextIdx);
       await playTrack(queue[nextIdx]);
@@ -425,23 +466,55 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       try {
         const nextList = await getNextTracks(currentTrack.id);
         if (nextList.length > 0) {
-          const fresh = nextList.filter(t => !queue.some(q => q.id === t.id));
+          const existingIds = new Set(queue.map(track => track.id));
+          const fresh = nextList.filter(track => !existingIds.has(track.id));
           if (fresh.length > 0) {
+            const expandedQueue = [...queue, ...fresh];
             const nextOne = fresh[0];
-            setQueue(prev => [...prev, ...fresh]);
             setQueueIndex(queue.length);
-            await playTrack(nextOne);
+            await playTrack(nextOne, expandedQueue);
             return;
           }
         }
-      } catch {
-        // end
+      } catch (error) {
+        console.warn('Unable to load the next track:', error);
       }
       setIsPlaying(false);
     } else {
       setIsPlaying(false);
     }
   };
+
+  // Keep long-lived YouTube callbacks pointed at the latest playback state.
+  handleTrackEndedRef.current = handleTrackEnded;
+  nextTrackRef.current = nextTrack;
+
+  // Preserve the current shuffle sequence as new queue items are appended.
+  useEffect(() => {
+    if (!isShuffle || queue.length === 0) return;
+
+    setShuffledIndices(previous => {
+      const seen = new Set<number>();
+      const valid = previous.filter(index => {
+        if (!Number.isInteger(index) || index < 0 || index >= queue.length || seen.has(index)) return false;
+        seen.add(index);
+        return true;
+      });
+      const missing = Array.from({ length: queue.length }, (_, index) => index)
+        .filter(index => !seen.has(index));
+
+      for (let i = missing.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [missing[i], missing[j]] = [missing[j], missing[i]];
+      }
+
+      const next = [...valid, ...missing];
+      if (next.length === previous.length && next.every((value, index) => value === previous[index])) {
+        return previous;
+      }
+      return next;
+    });
+  }, [queue.length, isShuffle]);
 
   const prevTrack = () => {
     if (queue.length === 0) return;
@@ -463,6 +536,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const removeFromQueue = (index: number) => {
     setQueue(prev => prev.filter((_, i) => i !== index));
+    setShuffledIndices(prev => prev
+      .filter(itemIndex => itemIndex !== index)
+      .map(itemIndex => itemIndex > index ? itemIndex - 1 : itemIndex));
     if (index < queueIndex) {
       setQueueIndex(prev => prev - 1);
     }
