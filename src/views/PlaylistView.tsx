@@ -32,6 +32,14 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
     if (initialPlaylist && initialPlaylist.tracks) {
       setPlaylist(initialPlaylist);
       setLoading(false);
+      setError(null);
+      return;
+    }
+
+    if (!playlistId) {
+      setPlaylist(null);
+      setError('Playlist could not be opened because its ID is missing. Return to Your Library and open it again.');
+      setLoading(false);
       return;
     }
 
