@@ -3,6 +3,7 @@ import { X, Plus, Check, Music2, Loader2 } from 'lucide-react';
 import { Track, Playlist } from '../../types/music.ts';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { addTrackToUserPlaylist } from '../../services/firebase.ts';
+import { useToast } from '../../context/ToastContext.tsx';
 
 interface AddToPlaylistModalProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
   onRefreshPlaylists,
 }) => {
   const { user, openAuthModal } = useAuth();
+  const { notify } = useToast();
   const [savingId, setSavingId] = useState<string | null>(null);
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
 
@@ -36,14 +38,33 @@ export const AddToPlaylistModal: React.FC<AddToPlaylistModalProps> = ({
 
     setSavingId(playlist.id);
     try {
-      await addTrackToUserPlaylist(user.uid, playlist.id, track);
+      const result = await addTrackToUserPlaylist(user.uid, playlist.id, track);
       setAddedIds(prev => new Set(prev).add(playlist.id));
       onRefreshPlaylists();
+      if (result.alreadyPresent) {
+        notify({ variant: 'info', title: 'Already in playlist', description: `“${track.title}” is already in “${playlist.name}”.` });
+      } else if (!result.sharedLinkUpdated) {
+        notify({
+          variant: 'warning',
+          title: 'Song added, share link not updated',
+          description: `“${track.title}” was added to “${playlist.name}”, but its public link could not be synced.`,
+        });
+      } else {
+        notify({ variant: 'success', title: 'Added to playlist', description: `“${track.title}” was added to “${playlist.name}”.` });
+      }
       setTimeout(() => {
         setSavingId(null);
       }, 500);
     } catch (e) {
       console.warn('Failed to add to playlist:', e);
+      const detail = e instanceof Error ? e.message : 'Unexpected Firebase error.';
+      notify({
+        variant: 'error',
+        title: 'Could not add to playlist',
+        description: detail.includes('permission') || detail.includes('insufficient')
+          ? 'Firestore denied this change. Confirm the latest firestore.rules are published to the same database SoundWave uses.'
+          : detail,
+      });
       setSavingId(null);
     }
   };

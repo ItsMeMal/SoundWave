@@ -304,43 +304,77 @@ export async function revokeSharedPlaylistLink(userId: string, playlistId: strin
   await batch.commit();
 }
 
-export async function addTrackToUserPlaylist(userId: string, playlistId: string, track: Track): Promise<void> {
+export interface AddTrackToPlaylistResult {
+  alreadyPresent: boolean;
+  sharedLinkUpdated: boolean;
+}
+
+export async function addTrackToUserPlaylist(
+  userId: string,
+  playlistId: string,
+  track: Track
+): Promise<AddTrackToPlaylistResult> {
   const path = `users/${userId}/playlists/${playlistId}`;
   try {
     const playlistRef = doc(db, 'users', userId, 'playlists', playlistId);
     const snap = await getDoc(playlistRef);
-    if (!snap.exists()) return;
+    if (!snap.exists()) throw new Error('Playlist not found. Refresh your Library and try again.');
 
     const data = snap.data() as Playlist;
-    if (data.userId !== userId) throw new Error('Only the playlist owner can edit this playlist.');
-    if ((data.tracks || []).some(existing => existing.id === track.id)) return;
 
-    const updatedTracks = [...(data.tracks || []), track];
+    // The document lives under this user's private collection. Older playlists may not
+    // contain userId, so backfill it instead of blocking the owner from adding tracks.
+    if (data.userId && data.userId !== userId) {
+      throw new Error('This playlist belongs to a different account.');
+    }
+
+    const existingTracks = Array.isArray(data.tracks) ? data.tracks : [];
+    if (existingTracks.some(existing => existing.id === track.id)) {
+      return { alreadyPresent: true, sharedLinkUpdated: true };
+    }
+
+    const updatedTracks = [...existingTracks, track];
     const now = new Date().toISOString();
-    const playlistUpdate: Record<string, any> = {
+
+    // Commit the owner's playlist first. A stale/disabled public link must not prevent
+    // a normal playlist edit from succeeding.
+    await setDoc(playlistRef, {
+      userId,
       tracks: updatedTracks,
       trackCount: updatedTracks.length,
       updatedAt: now,
-    };
-    const batch = writeBatch(db);
-    let sharedRef: ReturnType<typeof doc> | null = null;
+    }, { merge: true });
 
+    let sharedLinkUpdated = true;
     if (data.shareId) {
-      const candidateRef = doc(db, 'sharedPlaylists', data.shareId);
-      const sharedSnap = await getDoc(candidateRef);
-      if (sharedSnap.exists() && sharedSnap.data().ownerId === userId && sharedSnap.data().isPublic === true) {
-        sharedRef = candidateRef;
-      } else {
-        playlistUpdate.shareId = deleteField();
+      const sharedPath = `sharedPlaylists/${data.shareId}`;
+      try {
+        const sharedRef = doc(db, 'sharedPlaylists', data.shareId);
+        const sharedSnap = await getDoc(sharedRef);
+        if (
+          sharedSnap.exists() &&
+          sharedSnap.data().ownerId === userId &&
+          sharedSnap.data().isPublic === true
+        ) {
+          const publicTracks = toShareableTracks(updatedTracks);
+          await setDoc(sharedRef, {
+            tracks: publicTracks,
+            trackCount: publicTracks.length,
+            updatedAt: now,
+          }, { merge: true });
+        } else {
+          // Drop a stale token instead of letting it break future edits.
+          await setDoc(playlistRef, { shareId: deleteField(), updatedAt: now }, { merge: true });
+          sharedLinkUpdated = false;
+        }
+      } catch (shareError) {
+        // The private playlist has already been saved. Report the sync issue separately.
+        handleFirestoreError(shareError, OperationType.UPDATE, sharedPath);
+        sharedLinkUpdated = false;
       }
     }
 
-    batch.set(playlistRef, playlistUpdate, { merge: true });
-    if (sharedRef) {
-      const publicTracks = toShareableTracks(updatedTracks);
-      batch.set(sharedRef, { tracks: publicTracks, trackCount: publicTracks.length, updatedAt: now }, { merge: true });
-    }
-    await batch.commit();
+    return { alreadyPresent: false, sharedLinkUpdated };
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);
     throw err;
