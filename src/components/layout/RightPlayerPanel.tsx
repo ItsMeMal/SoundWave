@@ -20,6 +20,7 @@ import {
 import { usePlayer } from '../../context/PlayerContext.tsx';
 import { formatTime } from '../../utils/formatters.ts';
 import { ViewType, Track } from '../../types/music.ts';
+import { SleepTimerControl } from '../common/SleepTimerControl.tsx';
 
 interface RightPlayerPanelProps {
   onNavigate: (view: ViewType, payload?: any) => void;
@@ -335,6 +336,8 @@ export const RightPlayerPanel: React.FC<RightPlayerPanelProps> = ({
                 aria-label="Volume Slider"
               />
             </div>
+
+            <SleepTimerControl className="mt-5" />
 
             {/* "Up next" Queue List with Autoplay Toggle */}
             <div className="mt-6 pt-4 border-t border-[#181d26] flex-1">
