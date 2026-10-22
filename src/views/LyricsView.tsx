@@ -185,7 +185,7 @@ export const LyricsView: React.FC<LyricsViewProps> = ({ onNavigate }) => {
                     onClick={() => {
                       if (line.time !== undefined) seek(line.time);
                     }}
-                    className={`block w-full rounded-lg bg-transparent p-0 text-left transition-all duration-300 ease-out disabled:cursor-default ${isClickable ? 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60' : ''} ${lineStyle}`}
+                    className={`block w-full rounded-lg border-l-2 border-transparent bg-transparent py-1 pl-4 pr-2 text-left transition-all duration-300 ease-out disabled:cursor-default ${isClickable ? 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60' : ''} ${isActive && hasSyncedLyrics ? 'lyrics-line-active border-emerald-400' : ''} ${lineStyle}`}
                   >
                     {line.text}
                   </button>
