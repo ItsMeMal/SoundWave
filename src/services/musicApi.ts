@@ -240,22 +240,76 @@ export async function getStreamUrl(videoId: string): Promise<string | null> {
 }
 
 /**
- * Fetch lyrics
+ * Fetch lyrics, preferring timestamped lyrics for live line highlighting.
+ * The music API remains the primary source; LRCLIB is a fallback when its
+ * response contains plain text or no lyrics.
  */
-export async function getLyrics(videoId: string): Promise<LyricsResponse | null> {
+export async function getLyrics(videoId: string, track?: Track): Promise<LyricsResponse | null> {
   if (!videoId) return null;
+
+  const hasTimestamps = (value: string) => /\[\d{2,}:\d{2}(?:\.\d{2,3})?\]/.test(value);
+  let fallback: LyricsResponse | null = null;
+
   try {
     const res = await fetchWithFallback(`/api/lyrics/${videoId}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    return {
-      id: data.id || videoId,
-      source: data.source || 'Musixmatch',
-      lyrics: data.lyrics || ''
-    };
+    if (res.ok) {
+      const data = await res.json();
+      const text = typeof data.lyrics === 'string' ? data.lyrics : '';
+      fallback = text ? {
+        id: videoId,
+        source: data.source || 'Music API',
+        lyrics: text,
+      } : null;
+
+      if (text && hasTimestamps(text)) {
+        return fallback;
+      }
+    }
   } catch {
-    return null;
+    // Try LRCLIB below if track metadata is available.
   }
+
+  if (!track?.title || !track.artist) return fallback;
+
+  try {
+    const params = new URLSearchParams({
+      track_name: track.title,
+      artist_name: track.artist,
+    });
+    if (track.album) params.set('album_name', track.album);
+    if (track.duration > 0 && track.duration <= 3600) {
+      params.set('duration', String(Math.round(track.duration)));
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 7000);
+    let response: Response;
+    try {
+      response = await fetch(`https://lrclib.net/api/get?${params.toString()}`, {
+        signal: controller.signal,
+        headers: { 'Lrclib-Client': 'SoundWave/1.0 (https://github.com/ItsMeMal/SoundWave)' },
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (response.ok) {
+      const data = await response.json();
+      const syncedLyrics = typeof data.syncedLyrics === 'string' ? data.syncedLyrics : '';
+      if (syncedLyrics && hasTimestamps(syncedLyrics)) {
+        return { id: videoId, source: 'LRCLIB', lyrics: syncedLyrics };
+      }
+
+      const plainLyrics = typeof data.plainLyrics === 'string' ? data.plainLyrics : '';
+      if (!fallback && plainLyrics) {
+        fallback = { id: videoId, source: 'LRCLIB', lyrics: plainLyrics };
+      }
+    }
+  } catch {
+    // The primary music API may still have usable plain lyrics.
+  }
+
+  return fallback;
 }
 
 /**
