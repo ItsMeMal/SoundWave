@@ -263,6 +263,21 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     audioContextRef.current = context;
     audioSourceNodeRef.current = source;
     equalizerFiltersRef.current = filters;
+
+    // Mobile browsers can suspend Web Audio when the app loses visibility.
+    // If playback was active before the app switch, try to keep the audio graph alive.
+    context.addEventListener('statechange', () => {
+      if (
+        context.state === 'suspended' &&
+        document.visibilityState === 'hidden' &&
+        backgroundResumeIntentRef.current &&
+        isPlayingRef.current
+      ) {
+        void context.resume().catch(() => {
+          // Platform lifecycle policies may reject resume while the app is backgrounded.
+        });
+      }
+    });
     if (originalSource && !wasUsingYoutube) {
       audio.addEventListener('loadedmetadata', () => {
         if (trackId && currentTrackRef.current?.id !== trackId) return;
@@ -387,6 +402,22 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
     };
 
+    const backgroundRecoveryTimers: number[] = [];
+    const clearBackgroundRecoveryTimers = () => {
+      backgroundRecoveryTimers.forEach(timer => window.clearTimeout(timer));
+      backgroundRecoveryTimers.length = 0;
+    };
+
+    const tryKeepBackgroundAudioRunning = () => {
+      if (document.visibilityState !== 'hidden' || !backgroundResumeIntentRef.current || !isPlayingRef.current) return;
+      const context = audioContextRef.current;
+      if (context && context.state === 'suspended') {
+        void context.resume().catch(() => {
+          // Some mobile browser/OS combinations block Web Audio resume in the background.
+        });
+      }
+    };
+
     const onVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
         const audioIsPlaying = Boolean(audioRef.current && !audioRef.current.paused);
@@ -403,14 +434,18 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (backgroundResumeIntentRef.current) {
           persistCurrentProgress();
           writeActiveSession('snapshot');
-          const context = audioContextRef.current;
-          if (context && context.state !== 'running' && context.state !== 'closed') {
-            void context.resume().catch(() => {});
-          }
+          // Check again after lifecycle transitions: the AudioContext can suspend just
+          // after visibilitychange fires, rather than before it.
+          clearBackgroundRecoveryTimers();
+          [150, 500, 1200].forEach(delay => {
+            backgroundRecoveryTimers.push(window.setTimeout(tryKeepBackgroundAudioRunning, delay));
+          });
+          tryKeepBackgroundAudioRunning();
         }
         return;
       }
 
+      clearBackgroundRecoveryTimers();
       void resumeAfterInterruption();
     };
 
@@ -426,6 +461,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('pageshow', onVisibilityChange);
       window.removeEventListener('pagehide', onPageHide);
+      clearBackgroundRecoveryTimers();
     };
   }, []);
 
@@ -463,6 +499,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                   setIsStreamLoading(false);
                   setStreamError(null);
                 } else if (event.data === 2) { // PAUSED
+                  // Browsers can pause iframe playback during an app switch.
+                  // Preserve the intended media-session state until the user returns.
+                  if (document.visibilityState === 'hidden' && backgroundResumeIntentRef.current) return;
                   setIsPlaying(false);
                 } else if (event.data === 0) { // ENDED
                   handleTrackEndedRef.current();
