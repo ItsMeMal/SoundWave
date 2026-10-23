@@ -23,6 +23,16 @@ declare global {
 
 export type EqualizerPreset = 'Off' | 'Flat' | 'Bass Boost' | 'Pop' | 'Rock' | 'Vocal' | 'Treble' | 'Custom';
 
+function prefersBackgroundSafePlayback(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const standalone = typeof window !== 'undefined' && (
+    window.matchMedia?.('(display-mode: standalone)').matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true
+  );
+  return mobile || Boolean(standalone);
+}
+
 const EQUALIZER_PRESETS: Record<EqualizerPreset, number[]> = {
   Off: [0, 0, 0, 0, 0, 0],
   Flat: [0, 0, 0, 0, 0, 0],
@@ -164,6 +174,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const equalizerFiltersRef = useRef<BiquadFilterNode[]>([]);
   const backgroundResumeIntentRef = useRef(false);
   const backgroundResumeAttemptAtRef = useRef(0);
+  const failedMobileStreamUrlsRef = useRef<{ trackId: string; urls: Set<string> }>({ trackId: '', urls: new Set() });
+  const mobileStreamRecoveryRef = useRef<Promise<boolean> | null>(null);
   const isPlayingRef = useRef(isPlaying);
   const currentTrackRef = useRef<Track | null>(currentTrack);
   const currentTimeRef = useRef(currentTime);
@@ -709,17 +721,99 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [currentTime, duration]);
 
+  const retryMobileStreamForTrack = (trackId: string, failedUrl?: string): Promise<boolean> => {
+    if (!prefersBackgroundSafePlayback()) return Promise.resolve(false);
+    if (mobileStreamRecoveryRef.current) return mobileStreamRecoveryRef.current;
+
+    const audio = audioRef.current;
+    if (!audio) return Promise.resolve(false);
+
+    if (failedMobileStreamUrlsRef.current.trackId !== trackId) {
+      failedMobileStreamUrlsRef.current = { trackId, urls: new Set() };
+    }
+    const failedUrls = failedMobileStreamUrlsRef.current.urls;
+    [failedUrl, audio.currentSrc, audio.src].forEach(url => {
+      if (url) failedUrls.add(url);
+    });
+
+    const recovery = (async (): Promise<boolean> => {
+      try {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (currentTrackRef.current?.id !== trackId) return false;
+          const streamUrl = await getStreamUrl(trackId, {
+            preferMobile: true,
+            excludeUrls: [...failedUrls],
+          });
+          if (!streamUrl) break;
+
+          const activeAudio = audioRef.current;
+          if (!activeAudio || currentTrackRef.current?.id !== trackId) return false;
+
+          isUsingYtRef.current = false;
+          if (ytPlayerRef.current?.pauseVideo) ytPlayerRef.current.pauseVideo();
+          activeAudio.volume = isMuted ? 0 : volume;
+          activeAudio.src = streamUrl;
+
+          try {
+            await activeAudio.play();
+            if (currentTrackRef.current?.id !== trackId) {
+              activeAudio.pause();
+              return false;
+            }
+            setIsPlaying(true);
+            setIsStreamLoading(false);
+            setStreamError(null);
+            const selectedTrack = currentTrackRef.current;
+            if (selectedTrack) resumeListeningSession(selectedTrack);
+            return true;
+          } catch {
+            failedUrls.add(streamUrl);
+          }
+        }
+      } catch (error) {
+        console.warn('[SoundWave] Mobile audio recovery notice:', error);
+      }
+
+      if (currentTrackRef.current?.id === trackId) {
+        setIsPlaying(false);
+        setIsStreamLoading(false);
+        setStreamError('This track could not be played by the mobile audio player. Try another track.');
+      }
+      return false;
+    })();
+
+    mobileStreamRecoveryRef.current = recovery;
+    void recovery.then(
+      () => { if (mobileStreamRecoveryRef.current === recovery) mobileStreamRecoveryRef.current = null; },
+      () => { if (mobileStreamRecoveryRef.current === recovery) mobileStreamRecoveryRef.current = null; },
+    );
+    return recovery;
+  };
+
   // Real track playback
   const playTrack = async (track: Track, newQueue?: Track[], startAtSeconds = 0) => {
     if (!track || !track.id) return;
     backgroundResumeIntentRef.current = false;
+    mobileStreamRecoveryRef.current = null;
+    failedMobileStreamUrlsRef.current = { trackId: track.id, urls: new Set() };
     if (currentTrack && currentTime > 5) persistCurrentProgress(currentTrack, currentTime, duration);
     writeActiveSession('finish');
+
+    // Keep a single native audio element as the playback owner on mobile/PWA.
+    audioRef.current?.pause();
+    if (audioRef.current) {
+      audioRef.current.removeAttribute('src');
+      audioRef.current.load();
+    }
+    if (ytPlayerRef.current?.pauseVideo) ytPlayerRef.current.pauseVideo();
+    isUsingYtRef.current = false;
 
     setIsStreamLoading(true);
     setStreamError(null);
     setCurrentTrack(track);
+    currentTrackRef.current = track;
     setCurrentTime(0);
+    currentTimeRef.current = 0;
     setDuration(track.duration || 180);
 
     // Save playback history to Firestore if logged in
@@ -760,9 +854,13 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // Load verified lyrics asynchronously
     loadLyrics(track);
 
-    // 1. Try HTML5 Audio Stream first
+    // 1. Prefer the native HTMLAudioElement, especially on Android/PWA for background playback.
+    let directStreamUrl: string | null = null;
     try {
-      const streamUrl = await getStreamUrl(track.id);
+      const streamUrl = await getStreamUrl(track.id, {
+        preferMobile: prefersBackgroundSafePlayback(),
+      });
+      directStreamUrl = streamUrl;
       if (streamUrl && audioRef.current) {
         if (equalizerBands.some(gain => gain !== 0)) {
           try {
@@ -810,10 +908,29 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
     } catch {
-      // HTML5 direct stream failed or had Google IP binding
+      // The media element error handler tries alternate direct formats on mobile.
     }
 
-    // 2. Seamless Fallback: Background YouTube Audio Engine (100% reliable for any YouTube track)
+    // Hidden YouTube iframes are not a reliable background audio engine on phones.
+    if (prefersBackgroundSafePlayback()) {
+      const activeAudio = audioRef.current;
+      if (directStreamUrl && activeAudio && (activeAudio.currentSrc || activeAudio.src) === directStreamUrl && activeAudio.paused) {
+        const recovered = await retryMobileStreamForTrack(track.id, directStreamUrl);
+        if (recovered || currentTrackRef.current?.id !== track.id) return;
+        // All compatible direct formats failed. Do not switch to a hidden iframe that
+        // stops as soon as Android backgrounds the installed PWA.
+        return;
+      }
+      if (activeAudio && !activeAudio.paused && currentTrackRef.current?.id === track.id) return;
+      if (currentTrackRef.current?.id === track.id) {
+        setIsStreamLoading(false);
+        setIsPlaying(false);
+        setStreamError('Unable to start this track on this phone. Try another track or retry.');
+      }
+      return;
+    }
+
+    // Desktop-only fallback: hidden YouTube playback may stop when a browser backgrounds the page.
     if (ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === 'function') {
       try {
         isUsingYtRef.current = true;
@@ -1294,13 +1411,23 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }}
         onEnded={handleTrackEnded}
         onError={() => {
-          if (currentTrack && !isUsingYtRef.current && ytPlayerRef.current?.loadVideoById) {
+          const track = currentTrackRef.current;
+          const audio = audioRef.current;
+          if (!track || !audio || isUsingYtRef.current) return;
+
+          if (prefersBackgroundSafePlayback()) {
+            void retryMobileStreamForTrack(track.id, audio.currentSrc || audio.src);
+            return;
+          }
+
+          if (ytPlayerRef.current?.loadVideoById) {
             isUsingYtRef.current = true;
-            ytPlayerRef.current.loadVideoById(currentTrack.id);
+            ytPlayerRef.current.loadVideoById(track.id);
             ytPlayerRef.current.playVideo();
           }
         }}
         preload="auto"
+        playsInline
       />
       <div 
         ref={ytContainerRef} 
