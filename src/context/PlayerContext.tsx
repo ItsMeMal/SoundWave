@@ -914,7 +914,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // Hidden YouTube iframes are not a reliable background audio engine on phones.
     if (prefersBackgroundSafePlayback()) {
       const activeAudio = audioRef.current;
-      if (directStreamUrl && activeAudio && (activeAudio.currentSrc || activeAudio.src) === directStreamUrl && activeAudio.paused) {
+      if (directStreamUrl && activeAudio && activeAudio.paused) {
         const recovered = await retryMobileStreamForTrack(track.id, directStreamUrl);
         if (recovered || currentTrackRef.current?.id !== track.id) return;
         // All compatible direct formats failed. Do not switch to a hidden iframe that
