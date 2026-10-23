@@ -83,7 +83,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
   const songResults = results.slice(1);
 
   return (
-    <div className="p-6 md:p-8 space-y-6 max-w-6xl mx-auto select-none">
+    <div className="w-full min-w-0 p-4 sm:p-6 md:p-8 space-y-6 max-w-6xl mx-auto select-none">
       {/* Filter Category Chips */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1 custom-scrollbar">
         {filterChips.map((chip) => (
