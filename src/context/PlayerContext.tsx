@@ -523,7 +523,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 } else if (event.data === 2) { // PAUSED
                   // Browsers can pause iframe playback during an app switch.
                   // Preserve the intended media-session state until the user returns.
-                  if (document.visibilityState === 'hidden' && backgroundResumeIntentRef.current) return;
+                  if (document.visibilityState === 'hidden' && backgroundResumeIntentRef.current) {
+                    void attemptBackgroundPlayback();
+                    return;
+                  }
                   setIsPlaying(false);
                 } else if (event.data === 0) { // ENDED
                   handleTrackEndedRef.current();
