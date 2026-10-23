@@ -34,6 +34,28 @@ const EQUALIZER_PRESETS: Record<EqualizerPreset, number[]> = {
   Custom: [0, 0, 0, 0, 0, 0],
 };
 
+const EQUALIZER_STORAGE_KEY = 'soundwave_equalizer_settings_v1';
+
+function readEqualizerPreferences(): { preset: EqualizerPreset; bands: number[] } {
+  const fallback = { preset: 'Off' as EqualizerPreset, bands: [...EQUALIZER_PRESETS.Off] };
+  try {
+    const raw = localStorage.getItem(EQUALIZER_STORAGE_KEY);
+    if (!raw) return fallback;
+    const saved = JSON.parse(raw) as { preset?: unknown; bands?: unknown };
+    const preset = typeof saved.preset === 'string' &&
+      Object.prototype.hasOwnProperty.call(EQUALIZER_PRESETS, saved.preset)
+      ? saved.preset as EqualizerPreset
+      : fallback.preset;
+    const bands = Array.isArray(saved.bands) && saved.bands.length === 6 &&
+      saved.bands.every(value => typeof value === 'number' && Number.isFinite(value))
+      ? saved.bands.map(value => Math.max(-12, Math.min(12, value as number)))
+      : [...EQUALIZER_PRESETS[preset]];
+    return { preset, bands };
+  } catch {
+    return fallback;
+  }
+}
+
 interface ActiveListeningSession {
   id: string;
   userId: string;
@@ -114,8 +136,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [shuffledIndices, setShuffledIndices] = useState<number[]>([]);
   const [autoplay, setAutoplay] = useState<boolean>(true);
   const [playbackQuality, setPlaybackQuality] = useState<'Low' | 'Normal' | 'High' | 'Lossless'>('High');
-  const [equalizerPreset, setEqualizerPresetState] = useState<EqualizerPreset>('Off');
-  const [equalizerBands, setEqualizerBands] = useState<number[]>(EQUALIZER_PRESETS.Off);
+  const [initialEqualizer] = useState(readEqualizerPreferences);
+  const [equalizerPreset, setEqualizerPresetState] = useState<EqualizerPreset>(initialEqualizer.preset);
+  const [equalizerBands, setEqualizerBands] = useState<number[]>(initialEqualizer.bands);
   const [sleepTimerEndAt, setSleepTimerEndAt] = useState<number | null>(null);
   const [sleepTimerRemainingSeconds, setSleepTimerRemainingSeconds] = useState<number | null>(null);
   const [sleepTimerEndOfTrack, setSleepTimerEndOfTrack] = useState(false);
@@ -139,15 +162,29 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const equalizerFiltersRef = useRef<BiquadFilterNode[]>([]);
+  const backgroundResumeIntentRef = useRef(false);
+  const isPlayingRef = useRef(isPlaying);
   const currentTrackRef = useRef<Track | null>(currentTrack);
   const currentTimeRef = useRef(currentTime);
   const durationRef = useRef(duration);
   const userIdRef = useRef(user?.uid || null);
   const activeSessionRef = useRef<ActiveListeningSession | null>(null);
   currentTrackRef.current = currentTrack;
+  isPlayingRef.current = isPlaying;
   currentTimeRef.current = currentTime;
   durationRef.current = duration;
   userIdRef.current = user?.uid || null;
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(EQUALIZER_STORAGE_KEY, JSON.stringify({
+        preset: equalizerPreset,
+        bands: equalizerBands,
+      }));
+    } catch {
+      // The equalizer remains functional when browser storage is unavailable.
+    }
+  }, [equalizerPreset, equalizerBands]);
 
   const persistCurrentProgress = (
     track = currentTrackRef.current,
@@ -323,12 +360,73 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [user?.uid, currentTrack?.id, isPlaying]);
 
   useEffect(() => {
+    const resumeAfterInterruption = async () => {
+      if (!backgroundResumeIntentRef.current || document.visibilityState !== 'visible') return;
+      backgroundResumeIntentRef.current = false;
+
+      try {
+        const context = audioContextRef.current;
+        if (context && context.state !== 'running' && context.state !== 'closed') {
+          await context.resume();
+        }
+
+        const track = currentTrackRef.current;
+        if (!track) return;
+
+        if (isUsingYtRef.current && ytPlayerRef.current?.playVideo) {
+          ytPlayerRef.current.playVideo();
+        } else if (audioRef.current?.paused) {
+          await audioRef.current.play();
+        }
+
+        setIsPlaying(true);
+        resumeListeningSession(track);
+      } catch {
+        // Some browsers require a fresh user gesture after an OS-level audio interruption.
+        setIsPlaying(false);
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        const audioIsPlaying = Boolean(audioRef.current && !audioRef.current.paused);
+        let youtubeIsPlaying = false;
+        if (isUsingYtRef.current && ytPlayerRef.current?.getPlayerState) {
+          try {
+            youtubeIsPlaying = ytPlayerRef.current.getPlayerState() === 1;
+          } catch {
+            youtubeIsPlaying = false;
+          }
+        }
+
+        backgroundResumeIntentRef.current = isPlayingRef.current || audioIsPlaying || youtubeIsPlaying;
+        if (backgroundResumeIntentRef.current) {
+          persistCurrentProgress();
+          writeActiveSession('snapshot');
+          const context = audioContextRef.current;
+          if (context && context.state !== 'running' && context.state !== 'closed') {
+            void context.resume().catch(() => {});
+          }
+        }
+        return;
+      }
+
+      void resumeAfterInterruption();
+    };
+
     const onPageHide = () => {
       persistCurrentProgress();
       writeActiveSession('snapshot');
     };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pageshow', onVisibilityChange);
     window.addEventListener('pagehide', onPageHide);
-    return () => window.removeEventListener('pagehide', onPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pageshow', onVisibilityChange);
+      window.removeEventListener('pagehide', onPageHide);
+    };
   }, []);
 
   // Initialize resilient background audio engine (YouTube IFrame API)
@@ -549,6 +647,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Real track playback
   const playTrack = async (track: Track, newQueue?: Track[], startAtSeconds = 0) => {
     if (!track || !track.id) return;
+    backgroundResumeIntentRef.current = false;
     if (currentTrack && currentTime > 5) persistCurrentProgress(currentTrack, currentTime, duration);
     writeActiveSession('finish');
 
@@ -600,7 +699,19 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     try {
       const streamUrl = await getStreamUrl(track.id);
       if (streamUrl && audioRef.current) {
+        if (equalizerBands.some(gain => gain !== 0)) {
+          try {
+            // Restore saved equalizer settings before starting a direct stream.
+            await initializeEqualizer(equalizerBands);
+          } catch (error) {
+            console.warn('[SoundWave] Saved equalizer could not be restored:', error);
+          }
+        }
         isUsingYtRef.current = false;
+        if (audioSourceNodeRef.current && audioContextRef.current &&
+            audioContextRef.current.state !== 'running' && audioContextRef.current.state !== 'closed') {
+          await audioContextRef.current.resume().catch(() => {});
+        }
         if (ytPlayerRef.current?.pauseVideo) {
           ytPlayerRef.current.pauseVideo();
         }
@@ -762,6 +873,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const togglePlay = () => {
+    // An intentional play/pause action overrides any pending background recovery.
+    backgroundResumeIntentRef.current = false;
     if (!currentTrack) {
       if (queue.length > 0) {
         playTrack(queue[0]);
@@ -782,9 +895,22 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (isUsingYtRef.current && ytPlayerRef.current?.playVideo) {
         ytPlayerRef.current.playVideo();
       } else if (audioRef.current) {
-        audioRef.current.play().catch(() => {});
+        const audio = audioRef.current;
+        void (async () => {
+          try {
+            const context = audioContextRef.current;
+            if (context && context.state !== 'running' && context.state !== 'closed') {
+              await context.resume();
+            }
+            await audio.play();
+            setIsPlaying(true);
+          } catch {
+            setIsPlaying(false);
+          }
+        })();
+      } else {
+        setIsPlaying(true);
       }
-      setIsPlaying(true);
     }
   };
 
@@ -1089,6 +1215,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }}
         onPause={() => {
           if (!isUsingYtRef.current && !audioRef.current?.ended) {
+            // Mobile browsers can interrupt the media element while switching apps or locking the screen.
+            // Keep the playback intent when that happens so it can recover when the page becomes active.
+            if (document.visibilityState === 'hidden' && backgroundResumeIntentRef.current) return;
             setIsPlaying(false);
             persistCurrentProgress();
             writeActiveSession('pause');
