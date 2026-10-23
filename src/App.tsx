@@ -200,7 +200,7 @@ const AppContent: React.FC = () => {
           />
 
           {/* Dynamic Content Views */}
-          <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col relative">
+          <div className="flex-1 w-full min-w-0 overflow-x-hidden overflow-y-auto custom-scrollbar flex flex-col relative">
             {currentView === 'home' && (
               <HomeView
                 onNavigate={handleNavigate}
