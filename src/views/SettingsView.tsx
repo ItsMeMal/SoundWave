@@ -54,7 +54,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onNavigate }) => {
   };
 
   return (
-    <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-10 max-w-4xl mx-auto">
+    <div className="w-full min-w-0 flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-6 md:p-10 max-w-4xl mx-auto">
       {/* Back button */}
       <button
         onClick={() => onNavigate('home')}
