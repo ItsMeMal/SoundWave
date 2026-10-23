@@ -163,6 +163,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const audioSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const equalizerFiltersRef = useRef<BiquadFilterNode[]>([]);
   const backgroundResumeIntentRef = useRef(false);
+  const backgroundResumeAttemptAtRef = useRef(0);
   const isPlayingRef = useRef(isPlaying);
   const currentTrackRef = useRef<Track | null>(currentTrack);
   const currentTimeRef = useRef(currentTime);
@@ -185,6 +186,32 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // The equalizer remains functional when browser storage is unavailable.
     }
   }, [equalizerPreset, equalizerBands]);
+
+  const attemptBackgroundPlayback = async () => {
+    if (
+      document.visibilityState !== 'hidden' ||
+      !backgroundResumeIntentRef.current ||
+      !isPlayingRef.current ||
+      Date.now() - backgroundResumeAttemptAtRef.current < 900
+    ) return;
+
+    backgroundResumeAttemptAtRef.current = Date.now();
+    try {
+      const context = audioContextRef.current;
+      if (context && context.state !== 'running' && context.state !== 'closed') {
+        await context.resume();
+      }
+
+      if (isUsingYtRef.current && ytPlayerRef.current?.playVideo) {
+        const playerState = ytPlayerRef.current.getPlayerState?.();
+        if (playerState !== 1) ytPlayerRef.current.playVideo();
+      } else if (audioRef.current?.paused && currentTrackRef.current) {
+        await audioRef.current.play();
+      }
+    } catch {
+      // Android/browser lifecycle or audio-focus policies may reject background playback.
+    }
+  };
 
   const persistCurrentProgress = (
     track = currentTrackRef.current,
@@ -267,16 +294,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // Mobile browsers can suspend Web Audio when the app loses visibility.
     // If playback was active before the app switch, try to keep the audio graph alive.
     context.addEventListener('statechange', () => {
-      if (
-        context.state === 'suspended' &&
-        document.visibilityState === 'hidden' &&
-        backgroundResumeIntentRef.current &&
-        isPlayingRef.current
-      ) {
-        void context.resume().catch(() => {
-          // Platform lifecycle policies may reject resume while the app is backgrounded.
-        });
-      }
+      if (context.state === 'suspended') void attemptBackgroundPlayback();
     });
     if (originalSource && !wasUsingYoutube) {
       audio.addEventListener('loadedmetadata', () => {
@@ -437,10 +455,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           // Check again after lifecycle transitions: the AudioContext can suspend just
           // after visibilitychange fires, rather than before it.
           clearBackgroundRecoveryTimers();
-          [150, 500, 1200].forEach(delay => {
-            backgroundRecoveryTimers.push(window.setTimeout(tryKeepBackgroundAudioRunning, delay));
+          [150, 900, 1800].forEach(delay => {
+            backgroundRecoveryTimers.push(window.setTimeout(() => {
+              tryKeepBackgroundAudioRunning();
+              void attemptBackgroundPlayback();
+            }, delay));
           });
           tryKeepBackgroundAudioRunning();
+          void attemptBackgroundPlayback();
         }
         return;
       }
@@ -573,6 +595,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setSleepTimerEndAt(null);
       setSleepTimerRemainingSeconds(null);
       setSleepTimerEndOfTrack(false);
+      backgroundResumeIntentRef.current = false;
       persistCurrentProgress();
       writeActiveSession('pause');
 
@@ -855,6 +878,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (currentTrack && userIdRef.current) void clearPlaybackProgress(userIdRef.current, currentTrack.id);
     writeActiveSession('finish', true);
     if (sleepTimerEndOfTrack) {
+      backgroundResumeIntentRef.current = false;
       setSleepTimerEndOfTrack(false);
       setIsPlaying(false);
       setCurrentTime(duration > 0 ? duration : currentTime);
@@ -1256,7 +1280,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           if (!isUsingYtRef.current && !audioRef.current?.ended) {
             // Mobile browsers can interrupt the media element while switching apps or locking the screen.
             // Keep the playback intent when that happens so it can recover when the page becomes active.
-            if (document.visibilityState === 'hidden' && backgroundResumeIntentRef.current) return;
+            if (document.visibilityState === 'hidden' && backgroundResumeIntentRef.current) {
+              void attemptBackgroundPlayback();
+              return;
+            }
             setIsPlaying(false);
             persistCurrentProgress();
             writeActiveSession('pause');
