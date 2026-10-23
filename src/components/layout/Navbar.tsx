@@ -75,9 +75,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   return (
-    <header className="h-16 px-6 flex items-center justify-between border-b border-[#1a1f29] bg-[#0b0d11]/80 backdrop-blur-md sticky top-0 z-30">
+    <header className="sticky top-0 z-30 flex min-h-[4rem] flex-wrap items-center justify-between gap-y-3 border-b border-[#1a1f29] bg-[#0b0d11]/80 px-3 py-3 backdrop-blur-md sm:h-16 sm:flex-nowrap sm:px-6 sm:py-0">
       {/* Mobile menu button */}
-      <div className="flex items-center gap-3 md:hidden">
+      <div className="order-1 flex shrink-0 items-center gap-3 md:hidden">
         <button
           onClick={onToggleMobileMenu}
           className="p-2 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
@@ -96,7 +96,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Center Search Bar */}
-      <div className="relative flex-1 max-w-xl mx-2 sm:mx-4" ref={searchBoxRef}>
+      <div className="relative order-3 basis-full mx-0 min-w-0 flex-1 max-w-none sm:order-none sm:basis-auto sm:mx-2 sm:max-w-xl md:mx-4" ref={searchBoxRef}>
         <div className="flex items-center bg-[#151922] border border-[#232936] rounded-full px-4 py-2 focus-within:border-emerald-500/60 focus-within:ring-1 focus-within:ring-emerald-500/30 transition-all">
           <Search className="w-4 h-4 text-zinc-400 shrink-0 mr-3" />
           <input
@@ -109,7 +109,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             onFocus={() => setShowSuggestions(true)}
             onKeyDown={handleKeyDown}
             placeholder="Search songs, artists, albums, playlists..."
-            className="w-full bg-transparent text-sm text-white placeholder-zinc-500 focus:outline-none"
+            className="w-full min-w-0 flex-1 bg-transparent text-sm text-white placeholder-zinc-500 focus:outline-none"
           />
           {searchQuery && (
             <button
@@ -142,7 +142,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Right Action Icons: Notification Bell & Avatar */}
-      <div className="flex items-center gap-3">
+      <div className="order-2 ml-auto flex shrink-0 items-center gap-2 sm:order-none sm:ml-0 sm:gap-3">
         <div className="relative shrink-0" ref={notificationRef}>
           <button
             type="button"
