@@ -199,43 +199,42 @@ export async function getTrack(videoId: string): Promise<Track | null> {
   }
 }
 
+export interface StreamUrlOptions {
+  preferMobile?: boolean;
+  excludeUrls?: string[];
+}
+
 /**
- * Fetch stream URL from API with fallback formats (standard, f=140, f=251)
+ * Fetch an audio stream URL. Mobile browsers prefer M4A/AAC for broad support,
+ * and failed URLs can be excluded when trying an alternate stream after playback errors.
  */
-export async function getStreamUrl(videoId: string): Promise<string | null> {
+export async function getStreamUrl(
+  videoId: string,
+  options: StreamUrlOptions = {},
+): Promise<string | null> {
   if (!videoId) return null;
 
-  // 1. Standard format
-  try {
-    const res = await fetchProxy(`/api/stream/${videoId}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.stream_url) return data.stream_url;
-    }
-  } catch (err) {
-    console.warn(`Initial stream fetch notice for ${videoId}:`, err);
-  }
+  const mobileClient = typeof navigator !== 'undefined' && (
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (typeof window !== 'undefined' && window.matchMedia?.('(display-mode: standalone)').matches) ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true
+  );
+  const preferMobile = options.preferMobile ?? mobileClient;
+  const excluded = new Set(options.excludeUrls || []);
+  const formats: Array<string | null> = preferMobile ? ['140', null, '251'] : [null, '140', '251'];
 
-  // 2. Format 140 (M4A audio)
-  try {
-    const res140 = await fetchProxy(`/api/stream/${videoId}?f=140`);
-    if (res140.ok) {
-      const data140 = await res140.json();
-      if (data140.stream_url) return data140.stream_url;
+  for (const format of formats) {
+    const endpoint = format ? `/api/stream/${videoId}?f=${format}` : `/api/stream/${videoId}`;
+    try {
+      const response = await fetchProxy(endpoint);
+      if (!response.ok) continue;
+      const data = await response.json();
+      if (typeof data.stream_url === 'string' && data.stream_url && !excluded.has(data.stream_url)) {
+        return data.stream_url;
+      }
+    } catch (error) {
+      if (!format) console.warn(`Initial stream fetch notice for ${videoId}:`, error);
     }
-  } catch {
-    // ignore
-  }
-
-  // 3. Format 251 (Opus audio)
-  try {
-    const res251 = await fetchProxy(`/api/stream/${videoId}?f=251`);
-    if (res251.ok) {
-      const data251 = await res251.json();
-      if (data251.stream_url) return data251.stream_url;
-    }
-  } catch {
-    // ignore
   }
 
   return null;
