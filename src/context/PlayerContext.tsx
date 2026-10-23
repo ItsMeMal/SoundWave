@@ -790,6 +790,41 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return recovery;
   };
 
+  const playYouTubeFallback = (track: Track, startAtSeconds = 0): boolean => {
+    const player = ytPlayerRef.current;
+    if (!player || typeof player.loadVideoById !== 'function') return false;
+
+    try {
+      isUsingYtRef.current = true;
+      const audio = audioRef.current;
+      if (audio) {
+        audio.pause();
+        audio.removeAttribute('src');
+        audio.load();
+      }
+      player.loadVideoById(track.id);
+      player.setVolume(isMuted ? 0 : volume * 100);
+      player.playVideo();
+
+      if (startAtSeconds > 0) {
+        window.setTimeout(() => {
+          if (currentTrackRef.current?.id !== track.id || !ytPlayerRef.current?.seekTo) return;
+          ytPlayerRef.current.seekTo(startAtSeconds, true);
+          setCurrentTime(startAtSeconds);
+        }, 900);
+      }
+
+      resumeListeningSession(track);
+      setIsPlaying(true);
+      setIsStreamLoading(false);
+      setStreamError(null);
+      return true;
+    } catch (error) {
+      console.warn('[SoundWave] YouTube fallback notice:', error);
+      return false;
+    }
+  };
+
   // Real track playback
   const playTrack = async (track: Track, newQueue?: Track[], startAtSeconds = 0) => {
     if (!track || !track.id) return;
@@ -911,55 +946,18 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // The media element error handler tries alternate direct formats on mobile.
     }
 
-    // Hidden YouTube iframes are not a reliable background audio engine on phones.
-    if (prefersBackgroundSafePlayback()) {
-      const activeAudio = audioRef.current;
-      if (directStreamUrl && activeAudio && activeAudio.paused) {
-        const recovered = await retryMobileStreamForTrack(track.id, directStreamUrl);
-        if (recovered || currentTrackRef.current?.id !== track.id) return;
-        // All compatible direct formats failed. Do not switch to a hidden iframe that
-        // stops as soon as Android backgrounds the installed PWA.
-        return;
-      }
-      if (activeAudio && !activeAudio.paused && currentTrackRef.current?.id === track.id) return;
-      if (currentTrackRef.current?.id === track.id) {
-        setIsStreamLoading(false);
-        setIsPlaying(false);
-        setStreamError('Unable to start this track on this phone. Try another track or retry.');
-      }
-      return;
+    // Keep a playback fallback on mobile too. Prefer direct audio streams first,
+    // but never strand the listener just because the provider's direct stream fails.
+    if (directStreamUrl && audioRef.current?.paused && prefersBackgroundSafePlayback()) {
+      const recovered = await retryMobileStreamForTrack(track.id, directStreamUrl);
+      if (recovered || currentTrackRef.current?.id !== track.id) return;
     }
 
-    // Desktop-only fallback: hidden YouTube playback may stop when a browser backgrounds the page.
-    if (ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === 'function') {
-      try {
-        isUsingYtRef.current = true;
-        if (audioRef.current) {
-          audioRef.current.pause();
-          audioRef.current.src = '';
-        }
-        ytPlayerRef.current.loadVideoById(track.id);
-        ytPlayerRef.current.setVolume(isMuted ? 0 : volume * 100);
-        ytPlayerRef.current.playVideo();
-        if (startAtSeconds > 0) {
-          window.setTimeout(() => {
-            if (currentTrackRef.current?.id !== track.id || !ytPlayerRef.current?.seekTo) return;
-            ytPlayerRef.current.seekTo(startAtSeconds, true);
-            setCurrentTime(startAtSeconds);
-          }, 900);
-        }
-        resumeListeningSession(track);
-        setIsPlaying(true);
-        setIsStreamLoading(false);
-        setStreamError(null);
-        return;
-      } catch (err) {
-        console.warn('YT audio fallback notice:', err);
-      }
-    }
+    if (playYouTubeFallback(track, startAtSeconds)) return;
 
     setIsStreamLoading(false);
-    setStreamError('Audio stream unavailable. Click to retry.');
+    setIsPlaying(false);
+    setStreamError('Audio stream unavailable. Retry playback or choose another track.');
   };
 
   const resumeTrack = async (track: Track, position: number) => {
@@ -1413,18 +1411,17 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         onError={() => {
           const track = currentTrackRef.current;
           const audio = audioRef.current;
-          if (!track || !audio || isUsingYtRef.current) return;
+          if (!track || !audio || isUsingYtRef.current || !(audio.currentSrc || audio.src)) return;
 
           if (prefersBackgroundSafePlayback()) {
-            void retryMobileStreamForTrack(track.id, audio.currentSrc || audio.src);
+            void retryMobileStreamForTrack(track.id, audio.currentSrc || audio.src).then(recovered => {
+              if (recovered || currentTrackRef.current?.id !== track.id) return;
+              playYouTubeFallback(track);
+            });
             return;
           }
 
-          if (ytPlayerRef.current?.loadVideoById) {
-            isUsingYtRef.current = true;
-            ytPlayerRef.current.loadVideoById(track.id);
-            ytPlayerRef.current.playVideo();
-          }
+          playYouTubeFallback(track);
         }}
         preload="auto"
         playsInline
