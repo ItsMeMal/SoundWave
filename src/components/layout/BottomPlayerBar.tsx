@@ -190,7 +190,7 @@ export const BottomPlayerBar: React.FC<BottomPlayerBarProps> = ({ onNavigate, cl
                 <p 
                   onClick={() => {
                     setExpanded(false);
-                    onNavigate('artist', { name: currentTrack.artist });
+                    onNavigate('artist', { artistName: currentTrack.artists?.[0]?.name || currentTrack.artist, artistId: currentTrack.artists?.find((artist) => artist.id)?.id });
                   }}
                   className="text-sm text-zinc-400 hover:text-emerald-400 cursor-pointer truncate mt-1"
                 >
