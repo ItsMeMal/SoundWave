@@ -97,7 +97,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate, onOpenCreatePlay
   };
 
   return (
-    <div className="p-6 md:p-8 space-y-8 select-none max-w-7xl mx-auto">
+    <div className="w-full min-w-0 p-4 sm:p-6 md:p-8 space-y-8 select-none max-w-7xl mx-auto">
       {/* Error state */}
       {error && (
         <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl flex items-center justify-between text-xs text-rose-300">
