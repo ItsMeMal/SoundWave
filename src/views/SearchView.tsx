@@ -258,7 +258,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
                             )}
                             <button
                               onClick={() => {
-                                onNavigate('artist', { name: track.artist });
+                                onNavigate('artist', { artistName: track.artists?.[0]?.name || track.artist, artistId: track.artists?.find((artist) => artist.id)?.id });
                                 setActiveMenuId(null);
                               }}
                               className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:text-white hover:bg-zinc-800"
