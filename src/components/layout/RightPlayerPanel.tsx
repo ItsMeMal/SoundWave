@@ -201,7 +201,7 @@ export const RightPlayerPanel: React.FC<RightPlayerPanelProps> = ({
                   {currentTrack.title}
                 </h3>
                 <p 
-                  onClick={() => onNavigate('artist', { name: currentTrack.artist })}
+                  onClick={() => onNavigate('artist', { artistName: currentTrack.artists?.[0]?.name || currentTrack.artist, artistId: currentTrack.artists?.find((artist) => artist.id)?.id })}
                   className="text-xs text-zinc-400 hover:text-emerald-400 cursor-pointer truncate mt-0.5"
                 >
                   {currentTrack.artist}
